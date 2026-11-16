@@ -1,0 +1,6 @@
+# Los scripts de shell deben tener saltos de línea LF para funcionar en
+# Linux, macOS, Git Bash y dentro de contenedores.
+*.sh   text eol=lf
+*.go   text eol=lf
+*.sql  text eol=lf
+Makefile text eol=lf

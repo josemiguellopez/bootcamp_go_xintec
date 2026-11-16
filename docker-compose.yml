@@ -1,0 +1,62 @@
+# Entorno local completo: PostgreSQL + RabbitMQ + API + worker.
+# Las contraseñas son solo para desarrollo local (no son secretos reales).
+#
+#   docker compose up -d --build
+#   docker compose logs -f api worker
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: eventflow
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d eventflow"]
+      interval: 3s
+      retries: 20
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    ports:
+      - "5672:5672"
+      - "15672:15672" # consola web: http://localhost:15672 (guest / guest)
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      retries: 20
+
+  api:
+    build: .
+    ports:
+      - "3200:3200"
+    environment: &env
+      ENVIRONMENT: prod
+      DB_HOST: postgres
+      DB_PASSWORD: postgres
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+    depends_on: &deps
+      postgres: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+    restart: unless-stopped # si el proceso termina con error, Docker lo vuelve a levantar
+    stop_grace_period: 30s  # más que SHUTDOWN_TIMEOUT (20s) para el apagado ordenado
+
+  worker:
+    build: .
+    entrypoint: ["/worker"]
+    ports:
+      - "3201:3201"
+    environment:
+      <<: *env
+      # Probabilidad de que falle el email simulado (0 a 1), para ver los reintentos.
+      NOTIFIER_FAILURE_RATE: ${NOTIFIER_FAILURE_RATE:-0.3}
+    depends_on: *deps
+    restart: unless-stopped
+    stop_grace_period: 30s
+
+volumes:
+  pgdata:

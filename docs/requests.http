@@ -1,0 +1,46 @@
+### Peticiones de ejemplo (extensión "REST Client" de VS Code o cliente HTTP de IntelliJ)
+@api = http://localhost:3200
+
+### Crear pedido -> 201
+POST {{api}}/orders
+Content-Type: application/json
+Idempotency-Key: pedido-123
+
+{
+  "customer_id": "customer-42",
+  "items": [
+    { "sku": "SKU-1", "quantity": 2, "unit_price_cents": 1500 },
+    { "sku": "SKU-2", "quantity": 1, "unit_price_cents": 999 }
+  ]
+}
+
+### Repetir con la misma clave -> 200 con el mismo pedido
+POST {{api}}/orders
+Content-Type: application/json
+Idempotency-Key: pedido-123
+
+{
+  "customer_id": "customer-42",
+  "items": [
+    { "sku": "SKU-1", "quantity": 2, "unit_price_cents": 1500 },
+    { "sku": "SKU-2", "quantity": 1, "unit_price_cents": 999 }
+  ]
+}
+
+### Datos inválidos -> 400 ORDER_INVALID_QUANTITY
+POST {{api}}/orders
+Content-Type: application/json
+
+{ "customer_id": "customer-42", "items": [ { "sku": "SKU-1", "quantity": 0, "unit_price_cents": 1500 } ] }
+
+### Consultar (reemplaza el id)
+GET {{api}}/orders/00000000-0000-0000-0000-000000000000
+
+### Salud y métricas
+GET {{api}}/ready
+
+###
+GET {{api}}/metrics
+
+###
+GET http://localhost:3201/metrics

@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Manual de EventFlow</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Space+Grotesk:wght@500;700&display=swap">
+<style>
+/* Layout: índice fijo a la izquierda (columna en móvil) + columna de lectura de ~70ch; diagramas y tablas con scroll propio */
+:root {
+  --bg: #f6f8f8;
+  --surface: #ffffff;
+  --fg: #16201f;
+  --muted: #55625f;
+  --line: #d8e0de;
+  --accent: #0b6e78;
+  --accent-soft: #e2f1f2;
+  --event: #b4560f;
+  --event-soft: #fbeee2;
+  --ok: #1f7a3a;
+  --warn: #9a6200;
+  --err: #b42318;
+  --code-bg: #eef2f1;
+  --font-display: "Space Grotesk", "Segoe UI", system-ui, sans-serif;
+  --font-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1514; --surface: #151d1c; --fg: #e3ebe9; --muted: #9aaaa6; --line: #2a3634;
+    --accent: #5cc3cc; --accent-soft: #163236; --event: #f0a060; --event-soft: #3a2615;
+    --ok: #6fcf8a; --warn: #e6b450; --err: #f08a80; --code-bg: #1b2524; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1514; --surface: #151d1c; --fg: #e3ebe9; --muted: #9aaaa6; --line: #2a3634;
+  --accent: #5cc3cc; --accent-soft: #163236; --event: #f0a060; --event-soft: #3a2615;
+  --ok: #6fcf8a; --warn: #e6b450; --err: #f08a80; --code-bg: #1b2524; color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--fg);
+  font-family: var(--font-body); font-size: 16px; line-height: 1.6;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 0;
+  margin: 0;
+}
+.shell { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 48px; max-width: 1180px; margin: 0 auto; }
+nav.toc {
+  position: sticky; top: env(safe-area-inset-top, 0px); align-self: start;
+  padding-block: 40px; display: flex; flex-direction: column; gap: 4px;
+}
+nav.toc .brand { font-family: var(--font-display); font-weight: 700; font-size: 1.25rem; margin-bottom: 4px; }
+nav.toc .sub { color: var(--muted); font-size: 0.82rem; margin-bottom: 16px; }
+nav.toc a {
+  color: var(--muted); text-decoration: none; font-size: 0.92rem; padding: 6px 10px; border-radius: 6px;
+}
+nav.toc a:hover, nav.toc a:focus-visible { color: var(--fg); background: var(--accent-soft); outline: none; }
+main { min-width: 0; padding-block: 40px 80px; }
+.prose { max-width: 72ch; }
+
+header.hero { padding-bottom: 32px; border-bottom: 1px solid var(--line); margin-bottom: 8px; }
+.eyebrow { font-family: var(--font-mono); font-size: 0.78rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent); }
+h1 { font-family: var(--font-display); font-weight: 700; font-size: clamp(2rem, 4vw, 2.8rem); line-height: 1.1; margin: 8px 0 16px; text-wrap: balance; }
+h2 { font-family: var(--font-display); font-weight: 700; font-size: 1.7rem; margin: 0 0 12px; text-wrap: balance; }
+h3 { font-family: var(--font-display); font-weight: 500; font-size: 1.2rem; margin: 32px 0 8px; }
+section { padding-top: 48px; scroll-margin-top: 16px; }
+p { margin: 0 0 14px; }
+ul, ol { margin: 0 0 14px; padding-left: 22px; }
+li { margin-bottom: 6px; }
+a { color: var(--accent); }
+.lead { font-size: 1.1rem; color: var(--muted); }
+
+.flow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 20px 0 4px; font-family: var(--font-mono); font-size: 0.85rem; }
+.flow span { padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+.flow span.ev { border-color: var(--event); color: var(--event); background: var(--event-soft); }
+.flow i { color: var(--muted); font-style: normal; }
+
+code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+pre.code {
+  font-family: var(--font-mono); font-size: 0.85rem; line-height: 1.55;
+  background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px;
+  padding: 14px 16px; overflow-x: auto; margin: 0 0 16px;
+}
+pre.code code { background: none; padding: 0; font-size: inherit; }
+pre.code .c { color: var(--muted); }
+
+.table-wrap { overflow-x: auto; margin: 0 0 18px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 0.92rem; }
+th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); background: var(--bg); }
+tr:last-child td { border-bottom: none; }
+
+.st { font-family: var(--font-mono); font-size: 0.8rem; font-weight: 500; padding: 1px 7px; border-radius: 999px; white-space: nowrap; border: 1px solid currentColor; }
+.st.ok { color: var(--ok); } .st.warn { color: var(--warn); } .st.err { color: var(--err); }
+
+.diagram { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 16px; margin: 0 0 18px; }
+.diagram pre.mermaid { margin: 0; background: none; min-width: 520px; }
+.note { border-left: 3px solid var(--event); background: var(--event-soft); padding: 10px 14px; border-radius: 0 6px 6px 0; margin: 0 0 16px; }
+.qa dt { font-weight: 600; margin-top: 14px; }
+.qa dd { margin: 4px 0 0; color: var(--fg); }
+
+@media (max-width: 860px) {
+  .shell { grid-template-columns: 1fr; gap: 0; }
+  nav.toc { position: static; flex-direction: row; flex-wrap: wrap; padding-block: 24px 0; }
+  nav.toc .brand, nav.toc .sub { width: 100%; }
+  main { padding-top: 16px; }
+}
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+html { scroll-behavior: smooth; }
+</style>
+</head>
+<body>
+<div class="shell">
+  <nav class="toc" aria-label="Contenido">
+    <div class="brand">EventFlow</div>
+    <div class="sub">Go · PostgreSQL · RabbitMQ</div>
+    <a href="#instalacion">Instalación</a>
+    <a href="#uso">Uso</a>
+    <a href="#pruebas">Pruebas</a>
+    <a href="#arquitectura">Arquitectura</a>
+  </nav>
+
+  <main>
+    <header class="hero prose">
+      <div class="eyebrow">Go Architecture Challenge · Niveles 1 a 4</div>
+      <h1>Manual de EventFlow</h1>
+      <p class="lead">Una API de pedidos en Go. Guarda cada pedido en PostgreSQL y publica el evento <code>order.created</code> en RabbitMQ. Un worker lo procesa en segundo plano: confirma el pedido y envía un email simulado, con reintentos y cola de mensajes muertos.</p>
+      <div class="flow" aria-label="Recorrido de un pedido">
+        <span>POST /orders</span><i>→</i><span>PostgreSQL</span><i>→</i><span class="ev">order.created</span><i>→</i><span>worker</span><i>→</i><span>CONFIRMED</span>
+      </div>
+    </header>
+
+    <!-- ============ INSTALACIÓN ============ -->
+    <section id="instalacion" class="prose">
+      <div class="eyebrow">Guía 1</div>
+      <h2>Instalación</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Herramienta</th><th>Para qué</th><th>¿Obligatoria?</th></tr></thead>
+        <tbody>
+          <tr><td>Docker Desktop (o Docker Engine + Compose v2)</td><td>Levantar PostgreSQL, RabbitMQ, la API y el worker</td><td>Sí</td></tr>
+          <tr><td>Git (en Windows incluye Git Bash)</td><td>Clonar el repositorio y ejecutar <code>scripts/demo.sh</code></td><td>Sí</td></tr>
+          <tr><td>Go 1.25+</td><td>Correr las pruebas, o la API sin Docker</td><td>Para pruebas</td></tr>
+        </tbody>
+      </table></div>
+      <p>Puertos: <code>3200</code> API · <code>3201</code> worker · <code>5432</code> PostgreSQL · <code>5672</code> RabbitMQ · <code>15672</code> consola de RabbitMQ.</p>
+      <p><strong>Windows sin permisos de administrador:</strong> Go se puede instalar desde el <code>.zip</code> de go.dev. Descomprímelo, por ejemplo en <code>C:\Users\&lt;usuario&gt;\tools\go</code>, y agrega <code>...\go\bin</code> al <code>PATH</code> de tu usuario. Docker Desktop sí suele requerir permisos de administrador.</p>
+
+      <h3>Levantar el sistema</h3>
+<pre class="code"><code>git clone &lt;url-del-repositorio&gt; eventflow
+cd eventflow
+docker compose up -d --build
+
+docker compose ps                 <span class="c"># postgres y rabbitmq "healthy"; api y worker "running"</span>
+curl -s localhost:3200/ready      <span class="c"># {"database":"up","status":"up"}</span></code></pre>
+      <p>La API crea las tablas sola al arrancar (migraciones). Para detener: <code>docker compose down</code>; con <code>-v</code> también borra la base de datos.</p>
+
+      <h3>Problemas frecuentes</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Síntoma</th><th>Solución</th></tr></thead>
+        <tbody>
+          <tr><td><code>port is already allocated</code> en el 5432</td><td>Ya hay un PostgreSQL local: detenlo, o cambia el mapeo en <code>docker-compose.yml</code> a <code>"5433:5432"</code>.</td></tr>
+          <tr><td><code>error during connect … docker</code></td><td>Abre Docker Desktop y espera a que diga "Engine running".</td></tr>
+          <tr><td><code>bash: $'\r': command not found</code></td><td>Saltos de línea de Windows. Ejecuta <code>git config core.autocrlf input</code> y vuelve a clonar.</td></tr>
+          <tr><td><code>api</code> o <code>worker</code> se reinician</td><td>Revisa <code>docker compose logs api worker</code>. Si no conectan a postgres o rabbitmq, Docker los vuelve a intentar solo.</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <!-- ============ USO ============ -->
+    <section id="uso" class="prose">
+      <div class="eyebrow">Guía 2</div>
+      <h2>Uso</h2>
+      <h3>Crear un pedido</h3>
+<pre class="code"><code>curl -s -i -X POST localhost:3200/orders \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: pedido-001' \
+  -d '{"customer_id":"customer-42","items":[{"sku":"SKU-1","quantity":2,"unit_price_cents":1500}]}'
+
+<span class="c"># HTTP/1.1 201 Created
+# {"id":"4f1c…","status":"PENDING","total_cents":3000,…}</span></code></pre>
+      <p>Los precios van en centavos: <code>1500</code> = 15,00. El pedido nace <code>PENDING</code> y el worker lo pasa a <code>CONFIRMED</code> en segundo plano.</p>
+      <p>En PowerShell:</p>
+<pre class="code"><code>$body = '{"customer_id":"customer-42","items":[{"sku":"SKU-1","quantity":2,"unit_price_cents":1500}]}'
+Invoke-RestMethod -Method Post -Uri http://localhost:3200/orders -ContentType "application/json" `
+  -Headers @{ "Idempotency-Key" = "pedido-001" } -Body $body</code></pre>
+
+      <h3>Respuestas de la API</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Petición</th><th>Respuestas</th></tr></thead>
+        <tbody>
+          <tr><td><code>POST /orders</code></td><td><span class="st ok">201</span> creado · <span class="st ok">200</span> la clave ya se usó y se devuelve el mismo pedido · <span class="st warn">400</span> datos inválidos · <span class="st warn">413</span> cuerpo muy grande</td></tr>
+          <tr><td><code>GET /orders/{id}</code></td><td><span class="st ok">200</span> · <span class="st warn">400</span> id inválido · <span class="st warn">404</span> no existe</td></tr>
+          <tr><td><code>GET /health</code> · <code>/ready</code> · <code>/metrics</code></td><td>Proceso vivo · base de datos disponible (<span class="st ok">200</span> o <span class="st err">503</span>) · contadores</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>Reglas de validación</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Campo</th><th>Regla</th><th>Código de error</th></tr></thead>
+        <tbody>
+          <tr><td><code>customer_id</code></td><td>Obligatorio, máximo 64 caracteres</td><td><code>ORDER_INVALID_CUSTOMER</code></td></tr>
+          <tr><td><code>items</code></td><td>Entre 1 y 100 artículos</td><td><code>ORDER_EMPTY_ITEMS</code>, <code>ORDER_TOO_MANY_ITEMS</code></td></tr>
+          <tr><td><code>items[].sku</code></td><td>Obligatorio</td><td><code>ORDER_INVALID_SKU</code></td></tr>
+          <tr><td><code>items[].quantity</code></td><td>Entero entre 1 y 10.000</td><td><code>ORDER_INVALID_QUANTITY</code></td></tr>
+          <tr><td><code>items[].unit_price_cents</code></td><td>Entero entre 1 y 100.000.000</td><td><code>ORDER_INVALID_PRICE</code></td></tr>
+          <tr><td>Cuerpo</td><td>JSON válido, sin campos desconocidos, máximo 64 KB</td><td><code>INVALID_JSON</code>, <code>PAYLOAD_TOO_LARGE</code></td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>Reintentar sin duplicar</h3>
+      <p>Si el cliente no recibe respuesta, puede repetir la petición con la misma <code>Idempotency-Key</code>. La primera vez responde <span class="st ok">201</span>; las siguientes, <span class="st ok">200</span> con el mismo pedido y sin crear otro. Sin la cabecera, cada POST crea un pedido nuevo.</p>
+
+      <h3>Ver qué está pasando</h3>
+<pre class="code"><code>docker compose logs -f api worker
+docker compose logs api worker | grep &lt;request_id&gt;   <span class="c"># sigue un pedido de punta a punta</span>
+curl -s localhost:3201/metrics                        <span class="c"># reintentos, mensajes en DLQ, duplicados…</span></code></pre>
+      <p>El <code>request_id</code> del POST viaja dentro del evento como <code>correlation_id</code>, así que un solo <code>grep</code> muestra el pedido en la API y en el worker. La consola de RabbitMQ está en <code>http://localhost:15672</code> (usuario y contraseña <code>guest</code>, solo en local).</p>
+
+      <h3>Configuración útil</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Variable</th><th>Defecto</th><th>Efecto</th></tr></thead>
+        <tbody>
+          <tr><td><code>NOTIFIER_FAILURE_RATE</code></td><td>0.3 en compose</td><td>Probabilidad de que falle el email simulado; con <code>1</code> siempre falla y el mensaje termina en la DLQ</td></tr>
+          <tr><td><code>RETRY_MAX_ATTEMPTS</code></td><td>4</td><td>Intentos antes de mandar el mensaje a la DLQ</td></tr>
+          <tr><td><code>RETRY_INITIAL_BACKOFF</code></td><td>500ms</td><td>Primera espera; se duplica en cada intento (tope 5 s)</td></tr>
+          <tr><td><code>WORKER_CONCURRENCY</code></td><td>4</td><td>Mensajes en paralelo por cola</td></tr>
+          <tr><td><code>REQUEST_TIMEOUT</code> / <code>SHUTDOWN_TIMEOUT</code></td><td>5s / 20s</td><td>Límite por petición / por apagado ordenado</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <!-- ============ PRUEBAS ============ -->
+    <section id="pruebas" class="prose">
+      <div class="eyebrow">Guía 3</div>
+      <h2>Pruebas</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Tipo</th><th>Cantidad</th><th>Necesita</th></tr></thead>
+        <tbody>
+          <tr><td>Unitarias y HTTP</td><td>42</td><td>Solo Go: <code>go test ./...</code></td></tr>
+          <tr><td>Integración y punta a punta</td><td>7</td><td>PostgreSQL y RabbitMQ reales (Docker)</td></tr>
+          <tr><td>Demostraciones de fallos</td><td>4 escenarios</td><td>Sistema levantado y Git Bash</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>Integración, en Git Bash / Linux / macOS</h3>
+<pre class="code"><code>docker compose up -d postgres rabbitmq
+docker compose exec postgres createdb -U postgres eventflow_test
+export TEST_DATABASE_URL="postgres://postgres:postgres@localhost:5432/eventflow_test?sslmode=disable"
+export TEST_RABBITMQ_URL="amqp://guest:guest@localhost:5672/"
+go test -tags integration -p 1 -count=1 -v ./...</code></pre>
+      <h3>Integración, en PowerShell</h3>
+<pre class="code"><code>$env:TEST_DATABASE_URL = "postgres://postgres:postgres@localhost:5432/eventflow_test?sslmode=disable"
+$env:TEST_RABBITMQ_URL = "amqp://guest:guest@localhost:5672/"
+go test -tags integration -p 1 -count=1 -v ./...</code></pre>
+      <p><code>-p 1</code> hace que los paquetes corran de a uno, porque comparten la base de datos y las colas.</p>
+
+      <h3>Demostraciones de escenarios de fallo</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Comando</th><th>Qué deberías ver</th></tr></thead>
+        <tbody>
+          <tr><td><code>./scripts/demo.sh idempotency</code></td><td><span class="st ok">201</span> y luego <span class="st ok">200</span> con el mismo id; en la base, 1 solo pedido con esa clave</td></tr>
+          <tr><td><code>./scripts/demo.sh retries</code></td><td>Reintentos con espera creciente y luego el mensaje en <code>notifications.send.dlq</code>; el pedido igual queda <code>CONFIRMED</code></td></tr>
+          <tr><td><code>./scripts/demo.sh worker-down</code></td><td>La API responde igual; el pedido queda <code>PENDING</code> hasta que vuelve el worker</td></tr>
+          <tr><td><code>./scripts/demo.sh shutdown</code></td><td>El worker termina lo que está haciendo; lo demás queda en la cola</td></tr>
+        </tbody>
+      </table></div>
+
+      <h3>Criterios del desafío y su evidencia</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Criterio</th><th>Prueba o evidencia</th></tr></thead>
+        <tbody>
+          <tr><td>RF-01 Crear</td><td><code>TestCreateOrder_Returns201</code></td></tr>
+          <tr><td>RF-02 Validación</td><td><code>TestNewOrder_Validation</code>, <code>TestCreateOrder_InvalidRequestsReturn4xx</code></td></tr>
+          <tr><td>RF-03 Consultar</td><td><code>TestGetOrder</code></td></tr>
+          <tr><td>RF-04 Persistencia</td><td><code>TestOrderSurvivesRestart</code>, <code>migrations/</code></td></tr>
+          <tr><td>RF-05 Errores</td><td><code>TestDatabaseErrorDoesNotLeakDetails</code>, <code>TestTimeoutReturns503</code></td></tr>
+          <tr><td>RF-06 Configuración</td><td><code>cmd/config</code>, <code>.env.example</code></td></tr>
+          <tr><td>RF-07 / RF-08</td><td>Esta guía e Instalación</td></tr>
+          <tr><td>RF-09 Evento</td><td><code>TestCreateOrder_SavesAndPublishesEvent</code>, <code>TestOrderFlow_EndToEnd</code></td></tr>
+          <tr><td>RF-10 Idempotencia</td><td><code>TestConcurrentRequestsWithSameKeyCreateOneOrder</code> (20 peticiones simultáneas)</td></tr>
+          <tr><td>RF-11 Reintentos</td><td><code>TestFailingMessageEndsInDLQ</code>, <code>pkg/retry</code></td></tr>
+          <tr><td>RF-12 Confirmación</td><td><code>TestHandle_*</code>, <code>TestConfirmOrder</code></td></tr>
+          <tr><td>RF-13 Observabilidad</td><td><code>request_id</code> / <code>correlation_id</code> en los logs</td></tr>
+          <tr><td>RF-14 Apagado</td><td><code>TestHandle_ShutdownDuringRetriesRequeues</code>, demo <code>shutdown</code></td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <!-- ============ ARQUITECTURA ============ -->
+    <section id="arquitectura">
+      <div class="prose">
+        <div class="eyebrow">Guía 4</div>
+        <h2>Arquitectura</h2>
+        <h3>Componentes</h3>
+        <p>La API y el worker salen del mismo código y la misma imagen Docker, pero corren como dos procesos para que un email lento no afecte las respuestas HTTP.</p>
+      </div>
+      <div class="diagram"><pre class="mermaid">
+flowchart LR
+    C([Cliente HTTP]) -->|"POST /orders"| API["api :3200"]
+    API -->|"1. guarda el pedido"| PG[("PostgreSQL")]
+    API -->|"2. publica order.created"| MQ{{"RabbitMQ"}}
+    MQ --> W1["worker: order-processor&lt;br/&gt;PENDING a CONFIRMED"]
+    MQ --> W2["worker: notifier&lt;br/&gt;email simulado"]
+    W1 --> PG
+    W2 --> PG
+      </pre></div>
+
+      <div class="prose"><h3>Capas (como en la semilla)</h3>
+        <p>El dominio no importa nada externo; la infraestructura implementa sus interfaces.</p></div>
+      <div class="diagram"><pre class="mermaid">
+flowchart TB
+    P["presentation&lt;br/&gt;handler HTTP · consumer de mensajes"] --> A["application&lt;br/&gt;CreateOrder · GetOrder · ConfirmOrder"]
+    A --> D["domain&lt;br/&gt;Order, reglas, OrderRepository, EventPublisher"]
+    I["infrastructure&lt;br/&gt;PostgreSQL · RabbitMQ"] -. implementa .-> D
+      </pre></div>
+
+      <div class="prose"><h3>Crear un pedido</h3></div>
+      <div class="diagram"><pre class="mermaid">
+sequenceDiagram
+    actor C as Cliente
+    participant UC as CreateOrder
+    participant DB as PostgreSQL
+    participant MQ as RabbitMQ
+    C->>UC: POST /orders + Idempotency-Key
+    UC->>UC: NewOrder() valida las reglas
+    UC->>DB: INSERT ... ON CONFLICT (idempotency_key) DO NOTHING
+    alt la clave ya existía
+        DB-->>UC: 0 filas, se lee el pedido original
+        UC-->>C: 200 con el mismo pedido
+    else pedido nuevo
+        UC->>MQ: publica order.created y espera confirmación
+        UC-->>C: 201 PENDING
+    end
+      </pre></div>
+
+      <div class="prose"><h3>Reintentos y cola de mensajes muertos</h3></div>
+      <div class="diagram"><pre class="mermaid">
+flowchart LR
+    M[Mensaje] --> T{"¿Funcionó?"}
+    T -->|sí| ACK["ACK: listo"]
+    T -->|"error transitorio"| R{"¿Quedan intentos?"}
+    R -->|"sí: espera 0,5 s, 1 s, 2 s"| T
+    R -->|no| DLQ[".dlq para investigar"]
+    T -->|"error permanente"| DLQ
+    T -->|"apagado durante la espera"| Q["vuelve a la cola"]
+      </pre></div>
+
+      <div class="prose"><h3>Base de datos</h3></div>
+      <div class="diagram"><pre class="mermaid">
+erDiagram
+    orders ||--|{ order_items : contiene
+    orders {
+        uuid id PK
+        text customer_id
+        text status "PENDING o CONFIRMED"
+        bigint total_cents
+        text idempotency_key UK
+        timestamptz created_at
+    }
+    order_items {
+        uuid order_id PK
+        int position PK
+        text sku
+        int quantity
+        bigint unit_price_cents
+    }
+    notifications {
+        uuid id PK
+        uuid event_id UK
+        uuid order_id
+        timestamptz sent_at
+    }
+      </pre></div>
+
+      <div class="prose"><h3>Colas de RabbitMQ</h3></div>
+      <div class="diagram"><pre class="mermaid">
+flowchart LR
+    API -->|order.created| EX{{"eventflow.events"}}
+    EX --> Q1[["orders.processing"]] --> W1[order-processor]
+    EX --> Q2[["notifications.send"]] --> W2[notifier]
+    Q1 -. rechazado .-> D1[["orders.processing.dlq"]]
+    Q2 -. rechazado .-> D2[["notifications.send.dlq"]]
+      </pre></div>
+    </section>
+  </main>
+</div>
+
+<!-- Mermaid dibuja los diagramas (requiere conexión a internet la primera vez) -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script>
+  var dark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  mermaid.initialize({ startOnLoad: true, theme: dark ? 'dark' : 'default', securityLevel: 'strict' });
+</script>
+</body>
+</html>
