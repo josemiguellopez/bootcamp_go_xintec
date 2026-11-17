@@ -38,7 +38,7 @@ retries)
   docker compose logs worker --since 20s | grep -E 'will retry|dead-letter' || true
   title "Colas: notifications.send.dlq tiene el mensaje"
   queues
-  title "El pedido igual se CONFIRMÓ: el worker de pedidos es independiente"
+  title "El pedido igual quedó listo para despacho: el worker de pedidos es independiente"
   echo "estado: $(status_of "$ID")"
   title "Restauro el worker (NOTIFIER_FAILURE_RATE=0.3)"
   docker compose up -d worker

@@ -50,6 +50,9 @@ Go 1.25. Se corrigieron subiendo esas dependencias y la imagen de compilación a
 reporta ninguna vulnerabilidad en el código que se ejecuta (solo avisos en partes de módulos que el proyecto no
 llama). Conviene volver a correrlo antes de cada entrega, porque aparecen avisos nuevos con el tiempo.
 
+El sitio web de demostración se revisa con `cd site && npm audit`. Al subir Vite a la versión 6.4.6 quedó en 0
+vulnerabilidades. Las que tenía la versión 5 solo afectaban al servidor de desarrollo.
+
 ## Pruebas de integración
 
 Usan PostgreSQL y RabbitMQ reales. Están marcadas con la etiqueta `integration`, por eso `go test ./...` no las
@@ -58,6 +61,7 @@ incluye.
 **Git Bash / Linux / macOS:**
 
 ```bash
+docker compose stop api worker                                       # 1. primero: ver la nota de abajo
 docker compose up -d postgres rabbitmq
 docker compose exec postgres createdb -U postgres eventflow_test     # si ya existe, ignora el error
 export TEST_DATABASE_URL="postgres://postgres:postgres@localhost:5432/eventflow_test?sslmode=disable"
@@ -68,6 +72,7 @@ go test -tags integration -p 1 -count=1 -v ./...
 **PowerShell:**
 
 ```powershell
+docker compose stop api worker
 docker compose up -d postgres rabbitmq
 docker compose exec postgres createdb -U postgres eventflow_test
 $env:TEST_DATABASE_URL = "postgres://postgres:postgres@localhost:5432/eventflow_test?sslmode=disable"
@@ -79,8 +84,9 @@ Con `make`: `make test-integration`.
 
 - Se usa la base `eventflow_test` porque las pruebas borran las tablas.
 - `-p 1` hace que los paquetes corran de a uno, porque comparten la base y las colas.
-- **Detenga la API y el worker de Docker antes** (`docker compose stop api worker`): el worker escucha las mismas
-  colas de RabbitMQ y se "roba" los mensajes de la prueba de punta a punta, que entonces falla.
+- **Por qué el primer paso detiene la API y el worker:** el worker escucha las mismas colas de RabbitMQ y se "roba"
+  los mensajes de la prueba de punta a punta, que entonces falla. Al terminar, vuelva a levantarlos con
+  `docker compose up -d`.
 
 | Prueba | Qué demuestra |
 |---|---|
