@@ -8,6 +8,7 @@
 | [4. Arquitectura](04-arquitectura.md) | Diagramas de componentes, capas, flujos, estados, base de datos y colas |
 | [5. Postman](05-postman.md) | Probar cada endpoint con Postman, con pruebas automáticas y escenarios de fallo |
 | [6. Sitio web](06-sitio-web.md) | Levantar Docker, la base de datos local y el sitio para probar todo desde el navegador |
+| [7. Contratos de la API](07-contratos.md) | Qué recibe y devuelve cada endpoint, con ejemplos para copiar y scripts que validan los 32 contratos |
 
 Las decisiones técnicas y las respuestas a las preguntas del desafío están en el [README principal](../README.md).
 Las peticiones de ejemplo están en [requests.http](requests.http).

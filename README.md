@@ -27,6 +27,7 @@ flowchart LR
 | [Arquitectura](docs/04-arquitectura.md) | Diagramas: componentes, capas, secuencias, estados, base de datos y colas |
 | [Postman](docs/05-postman.md) | Colección lista para importar, con pruebas automáticas para cada endpoint |
 | [Sitio web](docs/06-sitio-web.md) | Sitio opcional para probar todo desde el navegador (hacer, buscar y seguir pedidos, y verificar cada requisito del PDF), y cómo revisar la base de datos local |
+| [Contratos de la API](docs/07-contratos.md) | Petición y respuesta de cada endpoint y del evento `order.created`, listas para copiar; `scripts/contratos.ps1` y `scripts/contratos.sh` validan los 32 contratos |
 
 ## Arranque rápido
 
@@ -62,6 +63,10 @@ terminal. No es parte de la API evaluada: es una herramienta para demostrarla ([
 | `GET` | `/orders/{id}` | `200` · `400` id inválido · `404` no existe |
 | `PATCH` | `/orders/{id}/status` con `{"status":"en_transito"}` | `200` actualizado · `400` estado desconocido · `404` no existe · `409` cambio no permitido |
 | `GET` | `/health` · `/ready` · `/metrics` | Proceso vivo · base de datos disponible (`200`/`503`) · contadores |
+
+Contrato completo de cada endpoint, con ejemplos reales y los errores posibles: [docs/07-contratos.md](docs/07-contratos.md).
+Para validarlos todos de una vez: `powershell -ExecutionPolicy Bypass -File .\scripts\contratos.ps1` (o
+`./scripts/contratos.sh` en Git Bash).
 
 ### Cliente y estados del pedido
 

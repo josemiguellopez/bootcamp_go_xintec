@@ -5,6 +5,7 @@
 | Unitarias y HTTP | 50 | Solo Go | `go test ./...` |
 | Integración y punta a punta | 7 | Docker (PostgreSQL y RabbitMQ reales) | ver abajo |
 | Demostraciones de fallos | 4 escenarios | Sistema levantado y Git Bash | `./scripts/demo.sh <escenario>` |
+| Contratos de la API | 32 contratos | Sistema levantado | `.\scripts\contratos.ps1` o `./scripts/contratos.sh` ([detalle](07-contratos.md)) |
 
 ## Pruebas unitarias y HTTP
 
