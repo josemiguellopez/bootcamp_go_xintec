@@ -22,6 +22,7 @@ let master = null;
 let buffer = null; // la grabación ya decodificada
 let loading = null;
 const playing = new Set(); // lo que suena ahora (para poder cortarlo)
+let pad = null; // el acorde de fondo de la búsqueda, mientras suena
 
 function readSetting() {
   try {
@@ -64,6 +65,35 @@ function stopAll() {
 }
 
 /** Toca un trozo de la grabación, con entrada y salida suaves (sin "clics"). */
+let noiseBuffer = null;
+
+/** Ruido blanco (base del roce del cajón, el papel y el soplido). */
+function noise() {
+  if (!noiseBuffer) {
+    noiseBuffer = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
+    const data = noiseBuffer.getChannelData(0);
+    for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+  }
+  const src = ctx.createBufferSource();
+  src.buffer = noiseBuffer;
+  src.loop = true;
+  return src;
+}
+
+/** Un golpecito grave y corto (el cajón que llega al tope). */
+function thunk(t, freq = 95, gain = 0.5) {
+  const osc = ctx.createOscillator();
+  const g = ctx.createGain();
+  osc.type = "sine";
+  osc.frequency.setValueAtTime(freq, t);
+  osc.frequency.exponentialRampToValueAtTime(45, t + 0.06);
+  g.gain.setValueAtTime(gain, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + 0.07);
+  osc.connect(g).connect(master);
+  osc.start(t);
+  osc.stop(t + 0.08);
+}
+
 function playSlice(from, seconds, { fadeIn = 0.02, fadeOut = 0.12, volume = 1 } = {}) {
   if (!buffer) return;
   const t = ctx.currentTime + 0.01;
@@ -92,7 +122,10 @@ export const sound = {
     } catch {
       /* sin almacenamiento: solo dura esta visita */
     }
-    if (!on) stopAll();
+    if (!on) {
+      stopAll();
+      this.searchStop(0.2);
+    }
   },
 
   /** Llamar dentro de un clic: deja el audio listo (y la grabación cargada) para más tarde. */
@@ -143,6 +176,131 @@ export const sound = {
       osc.start(t + delay);
       osc.stop(t + delay + 0.55);
     });
+  },
+
+  // -------------------------------------------------------------------------
+  // La búsqueda en el archivo (src/search.js): un acorde de fondo muy suave que
+  // queda "en suspenso" mientras se busca y se resuelve al final (mayor si el
+  // pedido aparece, menor si no), más el roce del cajón y el papel de las fichas.
+
+  /** Empieza el acorde de fondo (Asus2, grave y filtrado). Se detiene con resolve(). */
+  searchStart() {
+    if (!enabled || !audio()) return;
+    this.searchStop(0.1);
+    const t = ctx.currentTime;
+    const out = ctx.createGain();
+    out.gain.setValueAtTime(0.0001, t);
+    out.gain.exponentialRampToValueAtTime(0.045, t + 1.2); // entra despacio
+    const low = ctx.createBiquadFilter();
+    low.type = "lowpass";
+    low.frequency.value = 900;
+    // un leve vaivén de volumen, como si respirara
+    const lfo = ctx.createOscillator();
+    const depth = ctx.createGain();
+    lfo.frequency.value = 0.35;
+    depth.gain.value = 0.012;
+    lfo.connect(depth).connect(out.gain);
+    lfo.start(t);
+    const voices = [220, 246.9, 329.6, 493.9].map((freq, i) => {
+      const osc = ctx.createOscillator();
+      osc.type = i % 2 ? "sine" : "triangle";
+      osc.frequency.value = freq;
+      osc.detune.value = (i - 1.5) * 4; // un poco desafinado: más cálido
+      osc.connect(low);
+      osc.start(t);
+      return osc;
+    });
+    low.connect(out).connect(master);
+    pad = { out, nodes: [...voices, lfo] };
+  },
+
+  /** Apaga el acorde de fondo en `fade` segundos. */
+  searchStop(fade = 0.6) {
+    if (!pad || !ctx) return;
+    const { out, nodes } = pad;
+    pad = null;
+    const t = ctx.currentTime;
+    out.gain.cancelScheduledValues(t);
+    out.gain.setValueAtTime(Math.max(out.gain.value, 0.0001), t);
+    out.gain.exponentialRampToValueAtTime(0.0001, t + fade);
+    for (const n of nodes) n.stop(t + fade + 0.05);
+  },
+
+  /** Resuelve la búsqueda: acorde mayor arpegiado (encontrado) o menor y descendente (no está). */
+  searchResolve(found) {
+    this.searchStop(0.8);
+    if (!enabled || !audio()) return;
+    const t = ctx.currentTime + 0.05;
+    const notes = found ? [220, 277.2, 329.6, 440, 554.4] : [329.6, 261.6, 220];
+    notes.forEach((freq, i) => {
+      const at = t + i * (found ? 0.09 : 0.14);
+      const osc = ctx.createOscillator();
+      const g = ctx.createGain();
+      osc.type = "triangle";
+      osc.frequency.value = freq;
+      g.gain.setValueAtTime(0.0001, at);
+      g.gain.exponentialRampToValueAtTime(found ? 0.07 : 0.05, at + 0.03);
+      g.gain.exponentialRampToValueAtTime(0.0001, at + (found ? 2 : 1.4));
+      osc.connect(g).connect(master);
+      osc.start(at);
+      osc.stop(at + 2.1);
+    });
+  },
+
+  /** El roce del cajón al abrirse (o cerrarse): ruido grave que se desliza y un golpecito. */
+  drawer(closing = false) {
+    if (!enabled || !audio()) return;
+    const t = ctx.currentTime + 0.01;
+    const src = noise();
+    const low = ctx.createBiquadFilter();
+    low.type = "lowpass";
+    low.frequency.setValueAtTime(closing ? 900 : 350, t);
+    low.frequency.linearRampToValueAtTime(closing ? 350 : 900, t + 0.28);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.12, t + 0.06);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.32);
+    src.connect(low).connect(g).connect(master);
+    src.start(t);
+    src.stop(t + 0.35);
+    thunk(t + 0.3, closing ? 120 : 80, 0.18);
+  },
+
+  /** El "tic" de papel de una ficha al pasarla. */
+  flick() {
+    if (!enabled || !audio()) return;
+    const t = ctx.currentTime + 0.005;
+    const src = noise();
+    const high = ctx.createBiquadFilter();
+    high.type = "bandpass";
+    high.frequency.value = 3200 + Math.random() * 1200;
+    high.Q.value = 1.2;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.09, t + 0.005);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
+    src.connect(high).connect(g).connect(master);
+    src.start(t);
+    src.stop(t + 0.06);
+  },
+
+  /** Un soplido suave: la ficha vuela hasta la impresora. */
+  whoosh() {
+    if (!enabled || !audio()) return;
+    const t = ctx.currentTime + 0.01;
+    const src = noise();
+    const band = ctx.createBiquadFilter();
+    band.type = "bandpass";
+    band.Q.value = 0.9;
+    band.frequency.setValueAtTime(500, t);
+    band.frequency.exponentialRampToValueAtTime(2400, t + 0.7);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.07, t + 0.35);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.85);
+    src.connect(band).connect(g).connect(master);
+    src.start(t);
+    src.stop(t + 0.9);
   },
 
   /** Boleta lista: dos pitidos cortos y suaves, como una caja registradora. */

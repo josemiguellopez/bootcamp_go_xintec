@@ -15,6 +15,7 @@
 import { EXPLAIN, STATUS, el, renderProblem, shortId } from "./ui.js";
 import { renderReceipt } from "./boleta.js";
 import { thickCaret } from "./caret.js";
+import { sound } from "./sound.js";
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -82,12 +83,14 @@ function createCabinet() {
     drawer.querySelector(".fcards").replaceChildren(...keys.map((k, i) => card(k, FAKE_STATUS[i])));
     drawer.classList.remove("dim");
     drawer.classList.add("open");
+    sound.drawer();
   }
 
   /** Cierra un cajón ya revisado (queda marcado con ✗). */
   function close(drawer) {
     drawer.classList.remove("open");
     drawer.classList.add("checked");
+    sound.drawer(true);
   }
 
   /** Mete la ficha real en su lugar (ordenada por número), todavía sin destacar. */
@@ -107,6 +110,7 @@ function createCabinet() {
   async function check(drawer, target = null, ms = 190) {
     for (const c of drawer.querySelectorAll(".fcard")) {
       c.classList.add("flip");
+      sound.flick();
       await pause(ms);
       c.classList.remove("flip");
       if (c === target) return c;
@@ -220,6 +224,7 @@ export function setupSearch({ swarm, conn, workshop }) {
       await swarm.moveToEl("api", button);
       await swarm.click("api");
       swarm.say("api", "pidiéndolo al archivo…");
+      sound.searchStart(); // acorde de fondo, en suspenso mientras se busca
       workshop.logLine("req", `GET /orders/${id}`);
       const request = conn.api.getOrder(id); // la petición real corre mientras se ve la búsqueda
       scrollTo(document.querySelector(".search-layout"), "start"); // archivador e impresora a la vista
@@ -230,6 +235,7 @@ export function setupSearch({ swarm, conn, workshop }) {
         const res = await request;
         workshop.logResponse(`GET /orders/${shortId(id)}`, res);
         cabinet.rejected();
+        sound.searchResolve(false);
         lcd.textContent = "NÚMERO INVÁLIDO";
         const code = res.data?.error?.code ?? "ERROR";
         renderProblem(result, "Ese no es un número de pedido", EXPLAIN[code] ?? EXPLAIN.ORDER_INVALID_ID, `Código técnico: ${res.status} ${code}`);
@@ -274,13 +280,17 @@ export function setupSearch({ swarm, conn, workshop }) {
         swarm.say("postgres", "revisando las fichas…");
         const real = res.ok ? cabinet.insert(drawer, res.data) : null;
         hit = await cabinet.check(drawer, real);
-        if (!hit) cabinet.notFound(drawer);
+        if (!hit) {
+          cabinet.notFound(drawer);
+          sound.searchResolve(false); // se resuelve en menor: no está
+        }
         break;
       }
 
       // 3. Encontrado: la ficha vuela a la impresora y sale la boleta.
       if (res.ok && hit) {
         cabinet.found(hit);
+        sound.searchResolve(true); // se resuelve en mayor: ¡aquí está!
         await swarm.moveToEl("postgres", hit, { dx: 0.7, dy: 0.3 });
         swarm.say("postgres", "¡aquí está!");
         await pause(650);
@@ -290,6 +300,7 @@ export function setupSearch({ swarm, conn, workshop }) {
           await pause(450);
         }
         swarm.say("postgres", "a la impresora…");
+        sound.whoosh();
         await flyCard(hit, printer.querySelector(".printer-mouth"));
         renderReceipt(result, res.data, { title: "Pedido encontrado", onChangeStatus: workshop.changeStatus });
         return;
@@ -310,6 +321,7 @@ export function setupSearch({ swarm, conn, workshop }) {
       renderProblem(result, "Sin conexión", "No se pudo hablar con el sistema. Intente de nuevo.", err.message);
       conn.check();
     } finally {
+      sound.searchStop(); // por si terminó con error, el acorde de fondo no queda sonando
       busy = false;
       button.disabled = false;
       button.textContent = "Buscar";
