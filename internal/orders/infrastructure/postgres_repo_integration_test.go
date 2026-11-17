@@ -23,10 +23,10 @@ import (
 )
 
 var request = dto.CreateOrderRequest{
-	CustomerID: "customer-1",
+	CustomerID: "12345678-5",
 	Items: []dto.OrderItemRequest{
-		{SKU: "SKU-1", Quantity: 2, UnitPriceCents: 1500},
-		{SKU: "SKU-2", Quantity: 1, UnitPriceCents: 999},
+		{SKU: "SKU-1", Quantity: 2, UnitPrice: 1500},
+		{SKU: "SKU-2", Quantity: 1, UnitPrice: 999},
 	},
 }
 
@@ -58,7 +58,7 @@ func TestOrderSurvivesRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.TotalCents != 3999 || len(got.Items) != 2 || got.Items[0].SKU != "SKU-1" || !got.CreatedAt.Equal(created.CreatedAt) {
+	if got.Total != 3999 || len(got.Items) != 2 || got.Items[0].SKU != "SKU-1" || !got.CreatedAt.Equal(created.CreatedAt) {
 		t.Fatalf("stored order differs:\n got  %+v\n want %+v", got, created)
 	}
 }
@@ -98,23 +98,23 @@ func TestConcurrentRequestsWithSameKeyCreateOneOrder(t *testing.T) {
 }
 
 // RF-12: procesar el mismo evento dos veces deja el pedido igual.
-func TestConfirmTwiceIsSafe(t *testing.T) {
+func TestMarkReadyTwiceIsSafe(t *testing.T) {
 	pool := dbtest.Pool(t)
 	repo := infrastructure.NewPostgresOrderRepository(pool)
 	created, _, err := usecase.NewCreateOrderUseCase(repo, &ordertest.FakePublisher{}).Execute(context.Background(), request, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	confirm := usecase.NewConfirmOrderUseCase(repo)
+	markReady := usecase.NewMarkReadyUseCase(repo)
 
-	if already, err := confirm.Execute(context.Background(), created.ID); err != nil || already {
+	if already, err := markReady.Execute(context.Background(), created.ID); err != nil || already {
 		t.Fatalf("first: already=%v err=%v", already, err)
 	}
-	if already, err := confirm.Execute(context.Background(), created.ID); err != nil || !already {
+	if already, err := markReady.Execute(context.Background(), created.ID); err != nil || !already {
 		t.Fatalf("duplicate: already=%v err=%v", already, err)
 	}
 	o, _ := repo.FindByID(context.Background(), created.ID)
-	if o.Status() != domain.StatusConfirmed {
+	if o.Status() != domain.StatusListoParaDespacho {
 		t.Fatalf("status = %s", o.Status())
 	}
 }

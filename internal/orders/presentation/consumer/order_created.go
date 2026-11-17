@@ -16,13 +16,13 @@ import (
 	"go.uber.org/zap"
 )
 
-// OrderCreatedHandler confirma el pedido cuando llega order.created.
+// OrderCreatedHandler deja el pedido listo para despacho cuando llega order.created.
 type OrderCreatedHandler struct {
-	confirm *usecase.ConfirmOrderUseCase
+	markReady *usecase.MarkReadyUseCase
 }
 
-func NewOrderCreatedHandler(confirm *usecase.ConfirmOrderUseCase) *OrderCreatedHandler {
-	return &OrderCreatedHandler{confirm: confirm}
+func NewOrderCreatedHandler(markReady *usecase.MarkReadyUseCase) *OrderCreatedHandler {
+	return &OrderCreatedHandler{markReady: markReady}
 }
 
 // Handle cumple la firma rabbitmq.Handler.
@@ -32,7 +32,7 @@ func (h *OrderCreatedHandler) Handle(ctx context.Context, d rabbitmq.Delivery) e
 		return retry.Permanent(err) // mensaje mal formado: reintentar no sirve
 	}
 
-	alreadyConfirmed, err := h.confirm.Execute(ctx, event.OrderID)
+	alreadyProcessed, err := h.markReady.Execute(ctx, event.OrderID)
 	if err != nil {
 		if _, isBusinessError := apperrors.As(err); isBusinessError {
 			return retry.Permanent(err) // p. ej. el pedido no existe
@@ -41,11 +41,11 @@ func (h *OrderCreatedHandler) Handle(ctx context.Context, d rabbitmq.Delivery) e
 	}
 
 	log := logger.FromContext(ctx).With(zap.String("order_id", event.OrderID))
-	if alreadyConfirmed {
+	if alreadyProcessed {
 		metrics.Inc(metrics.MessagesDuplicated)
-		log.Info("duplicate message ignored: order already confirmed")
+		log.Info("duplicate message ignored: order already processed")
 		return nil
 	}
-	log.Info("order confirmed")
+	log.Info("order ready for dispatch")
 	return nil
 }

@@ -28,7 +28,8 @@ func (p *RabbitMQEventPublisher) PublishOrderCreated(ctx context.Context, e doma
 		CorrelationID: e.CorrelationID,
 		OrderID:       e.OrderID,
 		CustomerID:    e.CustomerID,
-		TotalCents:    e.TotalCents,
+		Total:         e.Total,
+		Currency:      domain.Currency,
 	})
 	if err != nil {
 		return fmt.Errorf("encode event: %w", err)

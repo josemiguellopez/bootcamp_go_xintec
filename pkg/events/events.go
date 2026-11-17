@@ -35,7 +35,8 @@ type OrderCreated struct {
 	CorrelationID string    `json:"correlation_id,omitempty"`
 	OrderID       string    `json:"order_id"`
 	CustomerID    string    `json:"customer_id"`
-	TotalCents    int64     `json:"total_cents"`
+	Total         int64     `json:"total"`    // en pesos chilenos (entero)
+	Currency      string    `json:"currency"` // "CLP"
 }
 
 // DecodeOrderCreated lee y valida un mensaje. Si falla, el mensaje está mal

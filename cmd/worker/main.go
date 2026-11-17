@@ -1,6 +1,6 @@
 // Comando worker: consume los eventos order.created con dos consumidores
 // independientes, cada uno con su propia cola y su propia DLQ:
-//   - worker de pedidos: pasa el pedido a CONFIRMED
+//   - worker de pedidos: pasa el pedido a listo_para_despacho
 //   - worker de notificaciones: envía un email simulado
 package main
 
@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
-	"sync"
 	"syscall"
 	"time"
 
@@ -30,6 +29,8 @@ import (
 	"microservice/pkg/logger"
 	"microservice/pkg/rabbitmq"
 	"microservice/pkg/retry"
+
+	"golang.org/x/sync/errgroup"
 )
 
 func main() {
@@ -71,8 +72,8 @@ func run(ctx context.Context) error {
 	}
 
 	// Armado de dependencias (igual que el container de la API).
-	confirmOrder := orderConsumer.NewOrderCreatedHandler(
-		orderUseCase.NewConfirmOrderUseCase(orderInfra.NewPostgresOrderRepository(pool)))
+	markReady := orderConsumer.NewOrderCreatedHandler(
+		orderUseCase.NewMarkReadyUseCase(orderInfra.NewPostgresOrderRepository(pool)))
 	notify := notifConsumer.NewOrderCreatedHandler(notifUseCase.NewSendOrderNotificationUseCase(
 		notifInfra.NewPostgresNotificationRepository(pool),
 		notifInfra.NewSimulatedEmailSender(cfg.NotifierFailureRate)))
@@ -87,7 +88,7 @@ func run(ctx context.Context) error {
 		}
 	}
 	consumers := []*rabbitmq.Consumer{
-		rabbitmq.NewConsumer(cfg.RabbitMQURL, consumerConfig("order-processor", events.QueueOrders), confirmOrder.Handle, log),
+		rabbitmq.NewConsumer(cfg.RabbitMQURL, consumerConfig("order-processor", events.QueueOrders), markReady.Handle, log),
 		rabbitmq.NewConsumer(cfg.RabbitMQURL, consumerConfig("notifier", events.QueueNotifications), notify.Handle, log),
 	}
 
@@ -100,27 +101,15 @@ func run(ctx context.Context) error {
 	go ops.ListenAndServe() //nolint:errcheck
 	defer ops.Close()
 
-	// Si un consumidor falla (p. ej. se cae RabbitMQ), cancelamos todo y
-	// salimos con error para que Docker reinicie el proceso.
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	var (
-		wg       sync.WaitGroup
-		firstErr error
-		once     sync.Once
-	)
+	// errgroup corre cada consumidor en su propia goroutine. Si uno falla
+	// (p. ej. se cae RabbitMQ), cancela ctx para que los demás se detengan, y
+	// Wait devuelve ese primer error: el proceso sale y Docker lo reinicia.
+	g, ctx := errgroup.WithContext(ctx)
 	for _, c := range consumers {
-		wg.Add(1)
-		go func(c *rabbitmq.Consumer) {
-			defer wg.Done()
-			if err := c.Run(ctx); err != nil {
-				once.Do(func() { firstErr = err })
-				cancel()
-			}
-		}(c)
+		g.Go(func() error { return c.Run(ctx) })
 	}
 	log.Info("worker started")
-	wg.Wait()
+	err = g.Wait()
 	log.Info("worker stopped")
-	return firstErr
+	return err
 }

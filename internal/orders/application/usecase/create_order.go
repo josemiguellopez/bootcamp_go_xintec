@@ -20,6 +20,9 @@ import (
 
 const MaxIdempotencyKeyLen = 128
 
+// publishTimeout es lo máximo que esperamos a que RabbitMQ confirme el evento.
+const publishTimeout = 5 * time.Second
+
 type CreateOrderUseCase struct {
 	repo   domain.OrderRepository
 	events domain.EventPublisher
@@ -40,7 +43,7 @@ func (uc *CreateOrderUseCase) Execute(ctx context.Context, req dto.CreateOrderRe
 
 	items := make([]domain.Item, len(req.Items))
 	for i, it := range req.Items {
-		items[i] = domain.Item{SKU: it.SKU, Quantity: it.Quantity, UnitPriceCents: it.UnitPriceCents}
+		items[i] = domain.Item{SKU: it.SKU, Quantity: it.Quantity, UnitPrice: it.UnitPrice}
 	}
 
 	// 1. El dominio valida las reglas de negocio.
@@ -66,15 +69,21 @@ func (uc *CreateOrderUseCase) Execute(ctx context.Context, req dto.CreateOrderRe
 
 	// 3. Publicar el evento. El pedido YA está guardado: si el broker falla,
 	// no devolvemos error (el cliente reintentaría y recibiría el mismo
-	// pedido). El evento se pierde y el pedido queda PENDING: es la brecha
+	// pedido). El evento se pierde y el pedido queda en_preparacion: es la brecha
 	// conocida que resolvería el patrón outbox (ver README).
-	err = uc.events.PublishOrderCreated(ctx, domain.OrderCreated{
+	//
+	// Usamos un contexto que NO se cancela si el cliente corta la conexión:
+	// el pedido ya existe, así que su evento se tiene que publicar igual.
+	// Tiene su propio límite de tiempo para no quedar esperando al broker.
+	publishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), publishTimeout)
+	defer cancel()
+	err = uc.events.PublishOrderCreated(publishCtx, domain.OrderCreated{
 		EventID:       uuid.NewString(),
 		OccurredAt:    saved.CreatedAt(),
 		CorrelationID: correlation.ID(ctx),
 		OrderID:       saved.ID(),
 		CustomerID:    saved.CustomerID(),
-		TotalCents:    saved.TotalCents(),
+		Total:         saved.Total(),
 	})
 	if err != nil {
 		metrics.Inc(metrics.EventsPublishFailed)

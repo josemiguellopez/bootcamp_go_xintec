@@ -37,10 +37,10 @@ func (r *PostgresOrderRepository) Create(ctx context.Context, o *domain.Order, k
 	defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck // no hace nada si ya hubo Commit
 
 	tag, err := tx.Exec(ctx, `
-		INSERT INTO orders (id, customer_id, status, total_cents, idempotency_key, created_at, updated_at)
+		INSERT INTO orders (id, customer_id, status, total, idempotency_key, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, NULLIF($5, ''), $6, $7)
 		ON CONFLICT (idempotency_key) DO NOTHING`,
-		o.ID(), o.CustomerID(), string(o.Status()), o.TotalCents(), key, o.CreatedAt(), o.UpdatedAt())
+		o.ID(), o.CustomerID(), string(o.Status()), o.Total(), key, o.CreatedAt(), o.UpdatedAt())
 	if err != nil {
 		return nil, false, fmt.Errorf("insert order: %w", err)
 	}
@@ -58,9 +58,9 @@ func (r *PostgresOrderRepository) Create(ctx context.Context, o *domain.Order, k
 
 	for i, it := range o.Items() {
 		if _, err := tx.Exec(ctx, `
-			INSERT INTO order_items (order_id, position, sku, quantity, unit_price_cents)
+			INSERT INTO order_items (order_id, position, sku, quantity, unit_price)
 			VALUES ($1, $2, $3, $4, $5)`,
-			o.ID(), i, it.SKU, it.Quantity, it.UnitPriceCents); err != nil {
+			o.ID(), i, it.SKU, it.Quantity, it.UnitPrice); err != nil {
 			return nil, false, fmt.Errorf("insert order item: %w", err)
 		}
 	}
@@ -72,7 +72,7 @@ func (r *PostgresOrderRepository) Create(ctx context.Context, o *domain.Order, k
 }
 
 func (r *PostgresOrderRepository) FindByID(ctx context.Context, id string) (*domain.Order, error) {
-	return findOrder(ctx, r.pool, id, "")
+	return findOrder(ctx, r.pool, selectOrder, id)
 }
 
 // UpdateStatus usa SELECT ... FOR UPDATE: si dos workers reciben el mismo
@@ -84,7 +84,7 @@ func (r *PostgresOrderRepository) UpdateStatus(ctx context.Context, id string, c
 	}
 	defer tx.Rollback(context.WithoutCancel(ctx)) //nolint:errcheck
 
-	o, err := findOrder(ctx, tx, id, " FOR UPDATE")
+	o, err := findOrder(ctx, tx, selectOrderForUpdate, id)
 	if err != nil {
 		return err
 	}
@@ -104,14 +104,21 @@ type querier interface {
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 }
 
-func findOrder(ctx context.Context, q querier, id, lock string) (*domain.Order, error) {
+// Las dos consultas posibles para leer un pedido. La segunda además bloquea
+// la fila hasta que termine la transacción (la usa UpdateStatus).
+const (
+	selectOrder          = `SELECT customer_id, status, created_at, updated_at FROM orders WHERE id = $1`
+	selectOrderForUpdate = `SELECT customer_id, status, created_at, updated_at FROM orders WHERE id = $1 FOR UPDATE`
+)
+
+// findOrder lee el pedido con la consulta indicada (selectOrder o
+// selectOrderForUpdate) y luego sus artículos.
+func findOrder(ctx context.Context, q querier, query, id string) (*domain.Order, error) {
 	var (
 		customerID, status   string
 		createdAt, updatedAt time.Time
 	)
-	err := q.QueryRow(ctx,
-		`SELECT customer_id, status, created_at, updated_at FROM orders WHERE id = $1`+lock, id,
-	).Scan(&customerID, &status, &createdAt, &updatedAt)
+	err := q.QueryRow(ctx, query, id).Scan(&customerID, &status, &createdAt, &updatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, domain.ErrOrderNotFound()
 	}
@@ -120,14 +127,14 @@ func findOrder(ctx context.Context, q querier, id, lock string) (*domain.Order, 
 	}
 
 	rows, err := q.Query(ctx,
-		`SELECT sku, quantity, unit_price_cents FROM order_items WHERE order_id = $1 ORDER BY position`, id)
+		`SELECT sku, quantity, unit_price FROM order_items WHERE order_id = $1 ORDER BY position`, id)
 	if err != nil {
 		return nil, fmt.Errorf("select items: %w", err)
 	}
 	var items []domain.Item
 	for rows.Next() {
 		var it domain.Item
-		if err := rows.Scan(&it.SKU, &it.Quantity, &it.UnitPriceCents); err != nil {
+		if err := rows.Scan(&it.SKU, &it.Quantity, &it.UnitPrice); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("scan item: %w", err)
 		}

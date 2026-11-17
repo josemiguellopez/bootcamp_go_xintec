@@ -33,7 +33,7 @@ func (h *OrderCreatedHandler) Handle(ctx context.Context, d rabbitmq.Delivery) e
 		EventID:    event.EventID,
 		OrderID:    event.OrderID,
 		CustomerID: event.CustomerID,
-		TotalCents: event.TotalCents,
+		Total:      event.Total,
 	})
 	if err != nil {
 		return err // proveedor o base de datos no disponibles: se reintenta

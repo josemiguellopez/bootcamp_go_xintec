@@ -26,6 +26,7 @@ func NewContainer(pool *pgxpool.Pool, publisher *rabbitmq.Publisher) *Container 
 		OrderHandler: orderHandler.NewOrderHandler(
 			orderUseCase.NewCreateOrderUseCase(repo, events),
 			orderUseCase.NewGetOrderUseCase(repo),
+			orderUseCase.NewChangeStatusUseCase(repo),
 		),
 	}
 }

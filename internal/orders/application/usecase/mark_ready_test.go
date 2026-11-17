@@ -20,18 +20,18 @@ func createOrder(t *testing.T, repo *ordertest.MemoryRepo) string {
 	return order.ID
 }
 
-func TestConfirmOrder(t *testing.T) {
+func TestMarkReady(t *testing.T) {
 	repo := ordertest.NewMemoryRepo()
 	id := createOrder(t, repo)
-	uc := NewConfirmOrderUseCase(repo)
+	uc := NewMarkReadyUseCase(repo)
 
 	already, err := uc.Execute(context.Background(), id)
 	if err != nil || already {
 		t.Fatalf("first time: already=%v err=%v", already, err)
 	}
 	o, _ := repo.FindByID(context.Background(), id)
-	if o.Status() != domain.StatusConfirmed {
-		t.Fatalf("status = %s, want CONFIRMED", o.Status())
+	if o.Status() != domain.StatusListoParaDespacho {
+		t.Fatalf("status = %s, want listo_para_despacho", o.Status())
 	}
 
 	// El mismo mensaje llega otra vez (duplicado): no cambia nada.
@@ -41,8 +41,8 @@ func TestConfirmOrder(t *testing.T) {
 	}
 }
 
-func TestConfirmOrder_UnknownOrder(t *testing.T) {
-	_, err := NewConfirmOrderUseCase(ordertest.NewMemoryRepo()).Execute(context.Background(), missingID)
+func TestMarkReady_UnknownOrder(t *testing.T) {
+	_, err := NewMarkReadyUseCase(ordertest.NewMemoryRepo()).Execute(context.Background(), missingID)
 	if !apperrors.HasCode(err, domain.CodeOrderNotFound) {
 		t.Fatalf("expected ORDER_NOT_FOUND, got %v", err)
 	}

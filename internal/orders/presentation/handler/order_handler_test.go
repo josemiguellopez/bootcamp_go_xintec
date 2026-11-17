@@ -23,7 +23,7 @@ import (
 	"go.uber.org/zap"
 )
 
-const validBody = `{"customer_id":"customer-1","items":[{"sku":"SKU-1","quantity":2,"unit_price_cents":1500}]}`
+const validBody = `{"customer_id":"12345678-5","items":[{"sku":"SKU-1","quantity":2,"unit_price":1500}]}`
 
 // newServer arma la API real (middlewares + handler + casos de uso) con un
 // repositorio en memoria en lugar de PostgreSQL.
@@ -34,7 +34,7 @@ func newServer(repo *ordertest.MemoryRepo) *gin.Engine {
 		middleware.BodyLimit(1024), middleware.Timeout(time.Second))
 	pub := &ordertest.FakePublisher{}
 	router.RegisterRoutes(r, handler.NewOrderHandler(
-		usecase.NewCreateOrderUseCase(repo, pub), usecase.NewGetOrderUseCase(repo)))
+		usecase.NewCreateOrderUseCase(repo, pub), usecase.NewGetOrderUseCase(repo), usecase.NewChangeStatusUseCase(repo)))
 	return r
 }
 
@@ -74,7 +74,7 @@ func TestCreateOrder_Returns201(t *testing.T) {
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body)
 	}
-	if !strings.Contains(rec.Body.String(), `"status":"PENDING"`) || orderID(t, rec) == "" {
+	if !strings.Contains(rec.Body.String(), `"status":"en_preparacion"`) || !strings.Contains(rec.Body.String(), `"currency":"CLP"`) || orderID(t, rec) == "" {
 		t.Errorf("unexpected body: %s", rec.Body)
 	}
 	if rec.Header().Get("X-Request-ID") == "" {
@@ -92,12 +92,13 @@ func TestCreateOrder_InvalidRequestsReturn4xx(t *testing.T) {
 	}{
 		{"malformed json", `{"customer_id":`, 400, "INVALID_JSON"},
 		{"empty body", ``, 400, "INVALID_JSON"},
-		{"unknown field", `{"customer_id":"c","items":[],"admin":true}`, 400, "INVALID_JSON"},
-		{"quantity as text", `{"customer_id":"c","items":[{"sku":"A","quantity":"1","unit_price_cents":1}]}`, 400, "INVALID_JSON"},
-		{"missing customer", `{"items":[{"sku":"A","quantity":1,"unit_price_cents":1}]}`, 400, "ORDER_INVALID_CUSTOMER"},
-		{"empty items", `{"customer_id":"c","items":[]}`, 400, "ORDER_EMPTY_ITEMS"},
-		{"zero quantity", `{"customer_id":"c","items":[{"sku":"A","quantity":0,"unit_price_cents":1}]}`, 400, "ORDER_INVALID_QUANTITY"},
-		{"negative price", `{"customer_id":"c","items":[{"sku":"A","quantity":1,"unit_price_cents":-5}]}`, 400, "ORDER_INVALID_PRICE"},
+		{"unknown field", `{"customer_id":"12345678-5","items":[],"admin":true}`, 400, "INVALID_JSON"},
+		{"quantity as text", `{"customer_id":"12345678-5","items":[{"sku":"A","quantity":"1","unit_price":1}]}`, 400, "INVALID_JSON"},
+		{"missing customer", `{"items":[{"sku":"A","quantity":1,"unit_price":1}]}`, 400, "ORDER_INVALID_CUSTOMER"},
+		{"customer is not a valid RUT", `{"customer_id":"12345678-9","items":[{"sku":"A","quantity":1,"unit_price":1}]}`, 400, "ORDER_INVALID_CUSTOMER"},
+		{"empty items", `{"customer_id":"12345678-5","items":[]}`, 400, "ORDER_EMPTY_ITEMS"},
+		{"zero quantity", `{"customer_id":"12345678-5","items":[{"sku":"A","quantity":0,"unit_price":1}]}`, 400, "ORDER_INVALID_QUANTITY"},
+		{"negative price", `{"customer_id":"12345678-5","items":[{"sku":"A","quantity":1,"unit_price":-5}]}`, 400, "ORDER_INVALID_PRICE"},
 		{"body too large", `{"customer_id":"` + strings.Repeat("x", 2048) + `"}`, 413, "PAYLOAD_TOO_LARGE"},
 	}
 	for _, tt := range tests {
@@ -190,5 +191,50 @@ func TestTimeoutReturns503(t *testing.T) {
 	rec := send(newServer(repo), "GET", "/orders/6b2f7f53-6a8e-4e0f-9b43-6a1f1d1f6c11", "", "")
 	if rec.Code != http.StatusServiceUnavailable || errorCode(t, rec) != "TIMEOUT" {
 		t.Fatalf("got %d %s, want 503 TIMEOUT", rec.Code, rec.Body)
+	}
+}
+
+// PATCH /orders/{id}/status: cambios permitidos (200), no permitidos (409) y datos malos (400/404).
+func TestChangeStatus(t *testing.T) {
+	srv := newServer(ordertest.NewMemoryRepo())
+	id := orderID(t, send(srv, "POST", "/orders", validBody, ""))
+	patch := func(orderID, body string) *httptest.ResponseRecorder {
+		return send(srv, "PATCH", "/orders/"+orderID+"/status", body, "")
+	}
+
+	tests := []struct {
+		name     string
+		id, body string
+		wantHTTP int
+		wantCode string // "" cuando la respuesta es correcta
+	}{
+		{"en_preparacion -> listo_para_despacho", id, `{"status":"listo_para_despacho"}`, 200, ""},
+		{"listo_para_despacho -> en_transito", id, `{"status":"en_transito"}`, 200, ""},
+		{"jump back is not allowed", id, `{"status":"en_preparacion"}`, 409, "ORDER_INVALID_TRANSITION"},
+		{"unknown status", id, `{"status":"perdido"}`, 400, "ORDER_INVALID_STATUS"},
+		{"malformed json", id, `{"status":`, 400, "INVALID_JSON"},
+		{"id is not a UUID", "abc", `{"status":"entregado"}`, 400, "ORDER_INVALID_ID"},
+		{"order does not exist", "6b2f7f53-6a8e-4e0f-9b43-6a1f1d1f6c11", `{"status":"entregado"}`, 404, "ORDER_NOT_FOUND"},
+		{"en_transito -> entregado", id, `{"status":"entregado"}`, 200, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := patch(tt.id, tt.body)
+			if rec.Code != tt.wantHTTP {
+				t.Fatalf("status = %d, want %d; body=%s", rec.Code, tt.wantHTTP, rec.Body)
+			}
+			if tt.wantCode != "" && errorCode(t, rec) != tt.wantCode {
+				t.Fatalf("code = %s, want %s", errorCode(t, rec), tt.wantCode)
+			}
+		})
+	}
+
+	var final struct {
+		Status       string   `json:"status"`
+		NextStatuses []string `json:"next_statuses"`
+	}
+	_ = json.Unmarshal(send(srv, "GET", "/orders/"+id, "", "").Body.Bytes(), &final)
+	if final.Status != "entregado" || len(final.NextStatuses) != 1 || final.NextStatuses[0] != "devuelto" {
+		t.Fatalf("final order = %+v, want entregado with next [devuelto]", final)
 	}
 }
