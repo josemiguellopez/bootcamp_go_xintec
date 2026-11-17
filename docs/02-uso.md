@@ -9,28 +9,29 @@ Linux o macOS. Al final de cada caso hay una versión para PowerShell.
 curl -s -i -X POST localhost:3200/orders \
   -H 'Content-Type: application/json' \
   -H 'Idempotency-Key: pedido-001' \
-  -d '{"customer_id":"customer-42","items":[
-        {"sku":"SKU-1","quantity":2,"unit_price_cents":1500},
-        {"sku":"SKU-2","quantity":1,"unit_price_cents":999}]}'
+  -d '{"customer_id":"12345678-5","items":[
+        {"sku":"SKU-1","quantity":2,"unit_price":8990},
+        {"sku":"SKU-2","quantity":1,"unit_price":3990}]}'
 ```
 
 ```http
 HTTP/1.1 201 Created
 X-Request-Id: 9e1519b3-...
 
-{"id":"4f1c2a8e-...","customer_id":"customer-42","status":"PENDING","total_cents":3999,
- "items":[{"sku":"SKU-1","quantity":2,"unit_price_cents":1500,"subtotal_cents":3000}, ...],
+{"id":"4f1c2a8e-...","customer_id":"12345678-5","status":"en_preparacion","total":21970,"currency":"CLP",
+ "items":[{"sku":"SKU-1","quantity":2,"unit_price":8990,"subtotal":17980}, ...],
  "created_at":"...","updated_at":"..."}
 ```
 
-- Los precios van en **centavos**: `1500` = 15,00.
-- El pedido nace `PENDING`. El worker lo pasa a `CONFIRMED` en segundo plano, normalmente en menos de un segundo.
+- Los montos están en **pesos chilenos** (CLP), sin decimales: `8990` = $8.990. Cada respuesta trae `"currency": "CLP"`.
+- El pedido nace `en_preparacion`. El worker lo pasa a `listo_para_despacho` en segundo plano, normalmente en menos de un segundo. Los demás estados se cambian con `PATCH /orders/{id}/status` (ver [Cambiar el estado](#cambiar-el-estado-de-un-pedido)).
+- `customer_id` es el **RUT** del cliente. Se acepta con o sin puntos (`12.345.678-5` o `12345678-5`) y se guarda sin puntos.
 - `X-Request-Id` identifica la petición en los logs.
 
 PowerShell:
 
 ```powershell
-$body = '{"customer_id":"customer-42","items":[{"sku":"SKU-1","quantity":2,"unit_price_cents":1500}]}'
+$body = '{"customer_id":"12345678-5","items":[{"sku":"SKU-1","quantity":2,"unit_price":8990}]}'
 Invoke-RestMethod -Method Post -Uri http://localhost:3200/orders -ContentType "application/json" `
   -Headers @{ "Idempotency-Key" = "pedido-001" } -Body $body
 ```
@@ -39,11 +40,11 @@ Invoke-RestMethod -Method Post -Uri http://localhost:3200/orders -ContentType "a
 
 | Campo | Regla | Código |
 |---|---|---|
-| `customer_id` | Obligatorio, máximo 64 caracteres | `ORDER_INVALID_CUSTOMER` |
+| `customer_id` | RUT chileno válido (se revisa el dígito verificador) | `ORDER_INVALID_CUSTOMER` |
 | `items` | Entre 1 y 100 artículos | `ORDER_EMPTY_ITEMS`, `ORDER_TOO_MANY_ITEMS` |
 | `items[].sku` | Obligatorio | `ORDER_INVALID_SKU` |
 | `items[].quantity` | Entero entre 1 y 10.000 | `ORDER_INVALID_QUANTITY` |
-| `items[].unit_price_cents` | Entero entre 1 y 100.000.000 | `ORDER_INVALID_PRICE` |
+| `items[].unit_price` | Pesos chilenos, entero entre 1 y 100.000.000 | `ORDER_INVALID_PRICE` |
 | Cuerpo | JSON válido y sin campos desconocidos | `INVALID_JSON` |
 | Cuerpo | Máximo 64 KB | `PAYLOAD_TOO_LARGE` (`413`) |
 | `Idempotency-Key` | Máximo 128 caracteres | `IDEMPOTENCY_KEY_INVALID` |
@@ -57,6 +58,35 @@ curl -s localhost:3200/orders/<id>
 La respuesta es `200` con el pedido, `404` si no existe y `400` si el id no es un UUID.
 
 PowerShell: `Invoke-RestMethod http://localhost:3200/orders/<id>`
+
+## Cambiar el estado de un pedido
+
+El worker deja cada pedido nuevo en `listo_para_despacho`. Desde ahí, el reparto se registra con:
+
+```bash
+curl -s -X PATCH localhost:3200/orders/<id>/status \
+  -H 'Content-Type: application/json' -d '{"status":"en_transito"}'
+```
+
+PowerShell:
+
+```powershell
+Invoke-RestMethod -Method Patch -Uri http://localhost:3200/orders/<id>/status -ContentType "application/json" `
+  -Body '{"status":"en_transito"}'
+```
+
+| Estado actual | Puede pasar a |
+|---|---|
+| `en_preparacion` | `listo_para_despacho` (lo hace el worker) |
+| `listo_para_despacho` | `en_transito` |
+| `en_transito` | `entregado`, `no_entregado` |
+| `no_entregado` | `en_transito` (reintento de entrega), `devuelto` |
+| `entregado` | `devuelto` |
+| `devuelto` | — (estado final) |
+
+- Cada respuesta incluye `next_statuses`: la lista de la columna derecha para el estado actual.
+- Un cambio que no está en la tabla responde `409 ORDER_INVALID_TRANSITION` y el pedido no cambia.
+- Un estado que no existe responde `400 ORDER_INVALID_STATUS`.
 
 ## Reintentar sin duplicar (idempotencia)
 
@@ -83,7 +113,7 @@ la API y en el worker:
 
 ```
 api     "msg":"order created"          "request_id":"9e15…" "order_id":"4f1c…"
-worker  "msg":"order confirmed"        "consumer":"order-processor" "correlation_id":"9e15…"
+worker  "msg":"order ready for dispatch" "consumer":"order-processor" "correlation_id":"9e15…"
 worker  "msg":"simulated email sent"   "consumer":"notifier" "correlation_id":"9e15…"
 ```
 
@@ -93,7 +123,7 @@ worker  "msg":"simulated email sent"   "consumer":"notifier" "correlation_id":"9
 **Base de datos:**
 
 ```bash
-docker compose exec postgres psql -U postgres -d eventflow -c "SELECT id, status, total_cents FROM orders ORDER BY created_at DESC LIMIT 5;"
+docker compose exec postgres psql -U postgres -d eventflow -c "SELECT id, status, total FROM orders ORDER BY created_at DESC LIMIT 5;"
 ```
 
 **Salud y métricas:**
@@ -128,4 +158,5 @@ Ejemplo, para que todos los emails fallen:
 NOTIFIER_FAILURE_RATE=1 docker compose up -d worker
 ```
 
-Más peticiones de ejemplo en [requests.http](requests.http) (extensión *REST Client* de VS Code).
+Más peticiones de ejemplo en [requests.http](requests.http) (extensión *REST Client* de VS Code) y en la
+[colección de Postman](05-postman.md).

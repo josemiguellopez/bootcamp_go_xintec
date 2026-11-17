@@ -1,7 +1,7 @@
 //go:build integration
 
 // Package e2e prueba el flujo completo con PostgreSQL y RabbitMQ reales:
-// crear pedido -> evento en RabbitMQ -> workers -> pedido CONFIRMED + notificación.
+// crear pedido -> evento en RabbitMQ -> workers -> pedido listo_para_despacho + notificación.
 // También prueba que un mensaje que siempre falla termina en la DLQ.
 package e2e
 
@@ -98,28 +98,28 @@ func TestOrderFlow_EndToEnd(t *testing.T) {
 	defer publisher.Close()
 	repo := orderInfra.NewPostgresOrderRepository(pool)
 
-	confirm := orderConsumer.NewOrderCreatedHandler(orderUseCase.NewConfirmOrderUseCase(repo))
+	markReady := orderConsumer.NewOrderCreatedHandler(orderUseCase.NewMarkReadyUseCase(repo))
 	notify := notifConsumer.NewOrderCreatedHandler(notifUseCase.NewSendOrderNotificationUseCase(
 		notifInfra.NewPostgresNotificationRepository(pool), notifInfra.NewSimulatedEmailSender(0)))
 	startConsumers(t,
-		rabbitmq.NewConsumer(url, rabbitmq.ConsumerConfig{Name: "orders", Queue: events.QueueOrders, Retry: fastRetry}, confirm.Handle, zap.NewNop()),
+		rabbitmq.NewConsumer(url, rabbitmq.ConsumerConfig{Name: "orders", Queue: events.QueueOrders, Retry: fastRetry}, markReady.Handle, zap.NewNop()),
 		rabbitmq.NewConsumer(url, rabbitmq.ConsumerConfig{Name: "notifier", Queue: events.QueueNotifications, Retry: fastRetry}, notify.Handle, zap.NewNop()),
 	)
 
 	created, _, err := orderUseCase.NewCreateOrderUseCase(repo, orderInfra.NewRabbitMQEventPublisher(publisher)).
 		Execute(ctx, dto.CreateOrderRequest{
-			CustomerID: "customer-e2e",
-			Items:      []dto.OrderItemRequest{{SKU: "SKU-1", Quantity: 1, UnitPriceCents: 500}},
+			CustomerID: "11111111-1",
+			Items:      []dto.OrderItemRequest{{SKU: "SKU-1", Quantity: 1, UnitPrice: 500}},
 		}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	waitUntil(t, "order CONFIRMED and notification saved", func() bool {
+	waitUntil(t, "order listo_para_despacho and notification saved", func() bool {
 		got, err := orderUseCase.NewGetOrderUseCase(repo).Execute(ctx, created.ID)
 		var notified int
 		_ = pool.QueryRow(ctx, `SELECT COUNT(*) FROM notifications WHERE order_id = $1`, created.ID).Scan(&notified)
-		return err == nil && got.Status == "CONFIRMED" && notified == 1
+		return err == nil && got.Status == "listo_para_despacho" && notified == 1
 	})
 }
 

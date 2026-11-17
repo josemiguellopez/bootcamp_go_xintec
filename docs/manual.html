@@ -131,7 +131,7 @@ html { scroll-behavior: smooth; }
       <h1>Manual de EventFlow</h1>
       <p class="lead">Una API de pedidos en Go. Guarda cada pedido en PostgreSQL y publica el evento <code>order.created</code> en RabbitMQ. Un worker lo procesa en segundo plano: confirma el pedido y envía un email simulado, con reintentos y cola de mensajes muertos.</p>
       <div class="flow" aria-label="Recorrido de un pedido">
-        <span>POST /orders</span><i>→</i><span>PostgreSQL</span><i>→</i><span class="ev">order.created</span><i>→</i><span>worker</span><i>→</i><span>CONFIRMED</span>
+        <span>POST /orders</span><i>→</i><span>PostgreSQL</span><i>→</i><span class="ev">order.created</span><i>→</i><span>worker</span><i>→</i><span>listo_para_despacho</span>
       </div>
     </header>
 
@@ -144,7 +144,7 @@ html { scroll-behavior: smooth; }
         <tbody>
           <tr><td>Docker Desktop (o Docker Engine + Compose v2)</td><td>Levantar PostgreSQL, RabbitMQ, la API y el worker</td><td>Sí</td></tr>
           <tr><td>Git (en Windows incluye Git Bash)</td><td>Clonar el repositorio y ejecutar <code>scripts/demo.sh</code></td><td>Sí</td></tr>
-          <tr><td>Go 1.25+</td><td>Correr las pruebas, o la API sin Docker</td><td>Para pruebas</td></tr>
+          <tr><td>Go 1.26+</td><td>Correr las pruebas, o la API sin Docker</td><td>Para pruebas</td></tr>
         </tbody>
       </table></div>
       <p>Puertos: <code>3200</code> API · <code>3201</code> worker · <code>5432</code> PostgreSQL · <code>5672</code> RabbitMQ · <code>15672</code> consola de RabbitMQ.</p>
@@ -179,13 +179,13 @@ curl -s localhost:3200/ready      <span class="c"># {"database":"up","status":"u
 <pre class="code"><code>curl -s -i -X POST localhost:3200/orders \
   -H 'Content-Type: application/json' \
   -H 'Idempotency-Key: pedido-001' \
-  -d '{"customer_id":"customer-42","items":[{"sku":"SKU-1","quantity":2,"unit_price_cents":1500}]}'
+  -d '{"customer_id":"12345678-5","items":[{"sku":"SKU-1","quantity":2,"unit_price":8990}]}'
 
 <span class="c"># HTTP/1.1 201 Created
-# {"id":"4f1c…","status":"PENDING","total_cents":3000,…}</span></code></pre>
-      <p>Los precios van en centavos: <code>1500</code> = 15,00. El pedido nace <code>PENDING</code> y el worker lo pasa a <code>CONFIRMED</code> en segundo plano.</p>
+# {"id":"4f1c…","status":"en_preparacion","total":17980,…}</span></code></pre>
+      <p>Los montos están en pesos chilenos, sin decimales: <code>8990</code> = $8.990. El cliente se identifica con su RUT. El pedido nace <code>en_preparacion</code> y el worker lo pasa a <code>listo_para_despacho</code> en segundo plano; los demás estados (<code>en_transito</code>, <code>entregado</code>, <code>no_entregado</code>, <code>devuelto</code>) se cambian con <code>PATCH /orders/{id}/status</code>.</p>
       <p>En PowerShell:</p>
-<pre class="code"><code>$body = '{"customer_id":"customer-42","items":[{"sku":"SKU-1","quantity":2,"unit_price_cents":1500}]}'
+<pre class="code"><code>$body = '{"customer_id":"12345678-5","items":[{"sku":"SKU-1","quantity":2,"unit_price":8990}]}'
 Invoke-RestMethod -Method Post -Uri http://localhost:3200/orders -ContentType "application/json" `
   -Headers @{ "Idempotency-Key" = "pedido-001" } -Body $body</code></pre>
 
@@ -207,7 +207,7 @@ Invoke-RestMethod -Method Post -Uri http://localhost:3200/orders -ContentType "a
           <tr><td><code>items</code></td><td>Entre 1 y 100 artículos</td><td><code>ORDER_EMPTY_ITEMS</code>, <code>ORDER_TOO_MANY_ITEMS</code></td></tr>
           <tr><td><code>items[].sku</code></td><td>Obligatorio</td><td><code>ORDER_INVALID_SKU</code></td></tr>
           <tr><td><code>items[].quantity</code></td><td>Entero entre 1 y 10.000</td><td><code>ORDER_INVALID_QUANTITY</code></td></tr>
-          <tr><td><code>items[].unit_price_cents</code></td><td>Entero entre 1 y 100.000.000</td><td><code>ORDER_INVALID_PRICE</code></td></tr>
+          <tr><td><code>items[].unit_price</code></td><td>Pesos chilenos, entero entre 1 y 100.000.000</td><td><code>ORDER_INVALID_PRICE</code></td></tr>
           <tr><td>Cuerpo</td><td>JSON válido, sin campos desconocidos, máximo 64 KB</td><td><code>INVALID_JSON</code>, <code>PAYLOAD_TOO_LARGE</code></td></tr>
         </tbody>
       </table></div>
@@ -241,7 +241,7 @@ curl -s localhost:3201/metrics                        <span class="c"># reintent
       <div class="table-wrap"><table>
         <thead><tr><th>Tipo</th><th>Cantidad</th><th>Necesita</th></tr></thead>
         <tbody>
-          <tr><td>Unitarias y HTTP</td><td>42</td><td>Solo Go: <code>go test ./...</code></td></tr>
+          <tr><td>Unitarias y HTTP</td><td>43</td><td>Solo Go: <code>go test ./...</code></td></tr>
           <tr><td>Integración y punta a punta</td><td>7</td><td>PostgreSQL y RabbitMQ reales (Docker)</td></tr>
           <tr><td>Demostraciones de fallos</td><td>4 escenarios</td><td>Sistema levantado y Git Bash</td></tr>
         </tbody>
@@ -264,8 +264,8 @@ go test -tags integration -p 1 -count=1 -v ./...</code></pre>
         <thead><tr><th>Comando</th><th>Qué deberías ver</th></tr></thead>
         <tbody>
           <tr><td><code>./scripts/demo.sh idempotency</code></td><td><span class="st ok">201</span> y luego <span class="st ok">200</span> con el mismo id; en la base, 1 solo pedido con esa clave</td></tr>
-          <tr><td><code>./scripts/demo.sh retries</code></td><td>Reintentos con espera creciente y luego el mensaje en <code>notifications.send.dlq</code>; el pedido igual queda <code>CONFIRMED</code></td></tr>
-          <tr><td><code>./scripts/demo.sh worker-down</code></td><td>La API responde igual; el pedido queda <code>PENDING</code> hasta que vuelve el worker</td></tr>
+          <tr><td><code>./scripts/demo.sh retries</code></td><td>Reintentos con espera creciente y luego el mensaje en <code>notifications.send.dlq</code>; el pedido igual queda <code>listo_para_despacho</code></td></tr>
+          <tr><td><code>./scripts/demo.sh worker-down</code></td><td>La API responde igual; el pedido queda <code>en_preparacion</code> hasta que vuelve el worker</td></tr>
           <tr><td><code>./scripts/demo.sh shutdown</code></td><td>El worker termina lo que está haciendo; lo demás queda en la cola</td></tr>
         </tbody>
       </table></div>
@@ -284,7 +284,7 @@ go test -tags integration -p 1 -count=1 -v ./...</code></pre>
           <tr><td>RF-09 Evento</td><td><code>TestCreateOrder_SavesAndPublishesEvent</code>, <code>TestOrderFlow_EndToEnd</code></td></tr>
           <tr><td>RF-10 Idempotencia</td><td><code>TestConcurrentRequestsWithSameKeyCreateOneOrder</code> (20 peticiones simultáneas)</td></tr>
           <tr><td>RF-11 Reintentos</td><td><code>TestFailingMessageEndsInDLQ</code>, <code>pkg/retry</code></td></tr>
-          <tr><td>RF-12 Confirmación</td><td><code>TestHandle_*</code>, <code>TestConfirmOrder</code></td></tr>
+          <tr><td>RF-12 Confirmación</td><td><code>TestHandle_*</code>, <code>TestMarkReady</code></td></tr>
           <tr><td>RF-13 Observabilidad</td><td><code>request_id</code> / <code>correlation_id</code> en los logs</td></tr>
           <tr><td>RF-14 Apagado</td><td><code>TestHandle_ShutdownDuringRetriesRequeues</code>, demo <code>shutdown</code></td></tr>
         </tbody>
@@ -304,7 +304,7 @@ flowchart LR
     C([Cliente HTTP]) -->|"POST /orders"| API["api :3200"]
     API -->|"1. guarda el pedido"| PG[("PostgreSQL")]
     API -->|"2. publica order.created"| MQ{{"RabbitMQ"}}
-    MQ --> W1["worker: order-processor&lt;br/&gt;PENDING a CONFIRMED"]
+    MQ --> W1["worker: order-processor&lt;br/&gt;en_preparacion a listo_para_despacho"]
     MQ --> W2["worker: notifier&lt;br/&gt;email simulado"]
     W1 --> PG
     W2 --> PG
@@ -314,7 +314,7 @@ flowchart LR
         <p>El dominio no importa nada externo; la infraestructura implementa sus interfaces.</p></div>
       <div class="diagram"><pre class="mermaid">
 flowchart TB
-    P["presentation&lt;br/&gt;handler HTTP · consumer de mensajes"] --> A["application&lt;br/&gt;CreateOrder · GetOrder · ConfirmOrder"]
+    P["presentation&lt;br/&gt;handler HTTP · consumer de mensajes"] --> A["application&lt;br/&gt;CreateOrder · GetOrder · ChangeStatus · MarkReady"]
     A --> D["domain&lt;br/&gt;Order, reglas, OrderRepository, EventPublisher"]
     I["infrastructure&lt;br/&gt;PostgreSQL · RabbitMQ"] -. implementa .-> D
       </pre></div>
@@ -334,7 +334,7 @@ sequenceDiagram
         UC-->>C: 200 con el mismo pedido
     else pedido nuevo
         UC->>MQ: publica order.created y espera confirmación
-        UC-->>C: 201 PENDING
+        UC-->>C: 201 en_preparacion
     end
       </pre></div>
 
@@ -357,8 +357,8 @@ erDiagram
     orders {
         uuid id PK
         text customer_id
-        text status "PENDING o CONFIRMED"
-        bigint total_cents
+        text status "uno de los 6 estados"
+        bigint total
         text idempotency_key UK
         timestamptz created_at
     }
@@ -367,7 +367,7 @@ erDiagram
         int position PK
         text sku
         int quantity
-        bigint unit_price_cents
+        bigint unit_price
     }
     notifications {
         uuid id PK

@@ -9,4 +9,5 @@ import (
 func RegisterRoutes(r gin.IRouter, h *handler.OrderHandler) {
 	r.POST("/orders", h.Create)
 	r.GET("/orders/:id", h.Get)
+	r.PATCH("/orders/:id/status", h.ChangeStatus)
 }

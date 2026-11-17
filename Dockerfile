@@ -1,7 +1,7 @@
 # ================================
 # STAGE 1: build (api + worker)
 # ================================
-FROM golang:1.25.5-alpine AS builder
+FROM golang:1.26.11-alpine AS builder
 WORKDIR /src
 
 COPY go.mod go.sum ./

@@ -30,7 +30,7 @@ type OrderCreated struct {
 	CorrelationID string
 	OrderID       string
 	CustomerID    string
-	TotalCents    int64
+	Total         int64
 }
 
 // EventPublisher es el puerto para publicar eventos (lo implementa RabbitMQ).

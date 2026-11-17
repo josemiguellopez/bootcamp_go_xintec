@@ -13,31 +13,27 @@ import (
 // Límites de negocio. Con ellos el total máximo es 100 * 10.000 * 1e8 = 1e14,
 // muy por debajo del máximo de int64, así que la suma nunca se desborda.
 const (
-	MaxItems          = 100
-	MaxQuantity       = 10_000
-	MaxUnitPriceCents = 100_000_000
-	MaxCustomerIDLen  = 64
+	MaxItems     = 100
+	MaxQuantity  = 10_000
+	MaxUnitPrice = 100_000_000
 )
 
-type Status string
+// Currency es la moneda de todos los montos: pesos chilenos. El CLP no usa
+// decimales, así que precios y totales son enteros (8990 = $8.990) y no hay
+// errores de redondeo.
+const Currency = "CLP"
 
-const (
-	StatusPending   Status = "PENDING"   // recién creado
-	StatusConfirmed Status = "CONFIRMED" // procesado por el worker de pedidos
-)
-
-// Item es una línea del pedido. Los precios van en centavos (enteros) para
-// evitar errores de redondeo con decimales.
+// Item es una línea del pedido. UnitPrice está en pesos chilenos (entero).
 type Item struct {
-	SKU            string
-	Quantity       int
-	UnitPriceCents int64
+	SKU       string
+	Quantity  int
+	UnitPrice int64
 }
 
-func (i Item) SubtotalCents() int64 { return int64(i.Quantity) * i.UnitPriceCents }
+func (i Item) Subtotal() int64 { return int64(i.Quantity) * i.UnitPrice }
 
 // Order tiene sus campos privados: solo se puede crear válido (NewOrder) y
-// solo cambia de estado con sus métodos (Confirm).
+// solo cambia de estado con TransitionTo, que respeta las reglas de status.go.
 type Order struct {
 	id         string
 	customerID string
@@ -47,12 +43,13 @@ type Order struct {
 	updatedAt  time.Time
 }
 
-// NewOrder valida los datos (RF-02) y crea el pedido en estado PENDING.
-func NewOrder(id, customerID string, items []Item, now time.Time) (*Order, error) {
-	customerID = strings.TrimSpace(customerID)
-	if customerID == "" || len(customerID) > MaxCustomerIDLen {
+// NewOrder valida los datos (RF-02) y crea el pedido en estado en_preparacion.
+// El cliente se identifica con su RUT, que se guarda normalizado (12345678-5).
+func NewOrder(id, customerRUT string, items []Item, now time.Time) (*Order, error) {
+	customerID, ok := NormalizeRUT(customerRUT)
+	if !ok {
 		return nil, apperrors.NewValidationError("ORDER_INVALID_CUSTOMER",
-			fmt.Sprintf("customer_id is required and must have at most %d characters", MaxCustomerIDLen))
+			"customer_id must be a valid Chilean RUT, for example 12345678-5")
 	}
 	if len(items) == 0 {
 		return nil, apperrors.NewValidationError("ORDER_EMPTY_ITEMS", "items must contain at least one item")
@@ -69,9 +66,9 @@ func NewOrder(id, customerID string, items []Item, now time.Time) (*Order, error
 			return nil, apperrors.NewValidationError("ORDER_INVALID_QUANTITY",
 				fmt.Sprintf("items[%d].quantity must be between 1 and %d", i, MaxQuantity))
 		}
-		if it.UnitPriceCents < 1 || it.UnitPriceCents > MaxUnitPriceCents {
+		if it.UnitPrice < 1 || it.UnitPrice > MaxUnitPrice {
 			return nil, apperrors.NewValidationError("ORDER_INVALID_PRICE",
-				fmt.Sprintf("items[%d].unit_price_cents must be between 1 and %d", i, MaxUnitPriceCents))
+				fmt.Sprintf("items[%d].unit_price must be between 1 and %d", i, MaxUnitPrice))
 		}
 	}
 
@@ -82,7 +79,7 @@ func NewOrder(id, customerID string, items []Item, now time.Time) (*Order, error
 		id:         id,
 		customerID: customerID,
 		items:      append([]Item(nil), items...), // copia: nadie puede cambiarlo desde afuera
-		status:     StatusPending,
+		status:     StatusEnPreparacion,
 		createdAt:  now,
 		updatedAt:  now,
 	}, nil
@@ -93,13 +90,13 @@ func Rehydrate(id, customerID string, items []Item, status Status, createdAt, up
 	return &Order{id: id, customerID: customerID, items: items, status: status, createdAt: createdAt, updatedAt: updatedAt}
 }
 
-// Confirm aplica la única transición permitida: PENDING -> CONFIRMED.
-func (o *Order) Confirm(now time.Time) error {
-	if o.status != StatusPending {
-		return apperrors.NewConflictError("ORDER_INVALID_TRANSITION",
-			fmt.Sprintf("order cannot be confirmed from status %s", o.status))
+// TransitionTo cambia el estado si la regla lo permite (ver status.go).
+// Si no, devuelve ORDER_INVALID_TRANSITION (HTTP 409) y el pedido no cambia.
+func (o *Order) TransitionTo(to Status, now time.Time) error {
+	if !CanTransition(o.status, to) {
+		return errInvalidTransition(o.status, to)
 	}
-	o.status = StatusConfirmed
+	o.status = to
 	o.updatedAt = now.UTC().Truncate(time.Microsecond)
 	return nil
 }
@@ -111,11 +108,11 @@ func (o *Order) CreatedAt() time.Time { return o.createdAt }
 func (o *Order) UpdatedAt() time.Time { return o.updatedAt }
 func (o *Order) Items() []Item        { return append([]Item(nil), o.items...) }
 
-// TotalCents suma los subtotales de todos los artículos.
-func (o *Order) TotalCents() int64 {
+// Total suma los subtotales de todos los artículos.
+func (o *Order) Total() int64 {
 	var total int64
 	for _, it := range o.items {
-		total += it.SubtotalCents()
+		total += it.Subtotal()
 	}
 	return total
 }

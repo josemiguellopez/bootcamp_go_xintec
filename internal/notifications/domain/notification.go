@@ -8,7 +8,7 @@ type Message struct {
 	EventID    string // también sirve como clave de idempotencia para el proveedor de email
 	OrderID    string
 	CustomerID string
-	TotalCents int64
+	Total      int64 // en pesos chilenos
 }
 
 // Sender envía el mensaje por un canal externo (aquí, un email simulado).

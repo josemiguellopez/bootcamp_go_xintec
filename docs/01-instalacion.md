@@ -6,7 +6,7 @@
 |---|---|---|
 | [Docker Desktop](https://www.docker.com/products/docker-desktop/) (o Docker Engine + Compose v2 en Linux) | Levantar PostgreSQL, RabbitMQ, la API y el worker | **Sí** |
 | [Git](https://git-scm.com/downloads) | Clonar el repositorio. En Windows incluye **Git Bash**, necesario para `scripts/demo.sh` | **Sí** |
-| [Go 1.25+](https://go.dev/dl/) | Correr las pruebas, o la API sin Docker | Para pruebas |
+| [Go 1.26+](https://go.dev/dl/) | Correr las pruebas, o la API sin Docker | Para pruebas |
 | curl | Probar la API (viene con Windows 10+, macOS y Linux) | Recomendada |
 
 Puertos que se usan: **3200** (API), **3201** (worker), **5432** (PostgreSQL), **5672** y **15672** (RabbitMQ y su
@@ -36,7 +36,7 @@ Instala Docker Engine con el plugin compose ([guía oficial](https://docs.docker
 
 ```bash
 docker compose version   # v2.x
-go version               # go1.25 o superior
+go version               # go1.26 o superior
 ```
 
 ## Levantar el sistema

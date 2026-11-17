@@ -14,8 +14,8 @@ import (
 
 func validRequest() dto.CreateOrderRequest {
 	return dto.CreateOrderRequest{
-		CustomerID: "customer-1",
-		Items:      []dto.OrderItemRequest{{SKU: "SKU-1", Quantity: 2, UnitPriceCents: 1000}},
+		CustomerID: "12345678-5",
+		Items:      []dto.OrderItemRequest{{SKU: "SKU-1", Quantity: 2, UnitPrice: 1000}},
 	}
 }
 
@@ -27,7 +27,7 @@ func TestCreateOrder_SavesAndPublishesEvent(t *testing.T) {
 	if err != nil || !created {
 		t.Fatalf("created=%v err=%v", created, err)
 	}
-	if order.Status != "PENDING" || order.TotalCents != 2000 || repo.Count() != 1 {
+	if order.Status != "en_preparacion" || order.Total != 2000 || repo.Count() != 1 {
 		t.Errorf("unexpected order: %+v", order)
 	}
 	if pub.Count() != 1 {
@@ -89,13 +89,30 @@ func TestCreateOrder_KeyTooLong(t *testing.T) {
 
 func TestCreateOrder_BrokerDownStillSavesOrder(t *testing.T) {
 	// Brecha conocida (ver README): el pedido se guarda y se responde OK,
-	// pero el evento no se publica y el pedido queda PENDING.
+	// pero el evento no se publica y el pedido queda en_preparacion.
 	repo := ordertest.NewMemoryRepo()
 	pub := &ordertest.FakePublisher{Err: errors.New("connection refused")}
 
 	order, created, err := NewCreateOrderUseCase(repo, pub).Execute(context.Background(), validRequest(), "")
-	if err != nil || !created || repo.Count() != 1 || order.Status != "PENDING" {
+	if err != nil || !created || repo.Count() != 1 || order.Status != "en_preparacion" {
 		t.Fatalf("created=%v err=%v orders=%d", created, err, repo.Count())
+	}
+}
+
+// Pregunta 1 del desafío: el cliente corta la conexión justo después de que
+// el pedido se guardó. El evento se tiene que publicar igual; si no, el
+// pedido quedaría en_preparacion para siempre.
+func TestCreateOrder_ClientDisconnectStillPublishesEvent(t *testing.T) {
+	repo, pub := ordertest.NewMemoryRepo(), &ordertest.FakePublisher{}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // el cliente se fue
+
+	_, created, err := NewCreateOrderUseCase(repo, pub).Execute(ctx, validRequest(), "")
+	if err != nil || !created {
+		t.Fatalf("created=%v err=%v", created, err)
+	}
+	if pub.Count() != 1 {
+		t.Fatalf("events = %d, want 1: the event must be published even if the client disconnected", pub.Count())
 	}
 }
 

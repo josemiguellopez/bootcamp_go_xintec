@@ -9,11 +9,11 @@
 set -euo pipefail
 
 API=http://localhost:3200
-BODY='{"customer_id":"customer-demo","items":[{"sku":"SKU-1","quantity":2,"unit_price_cents":1500}]}'
+BODY='{"customer_id":"11111111-1","items":[{"sku":"SKU-1","quantity":2,"unit_price":8990}]}'
 
 title()     { printf '\n\033[1;36m== %s ==\033[0m\n' "$*"; }
 new_order() { curl -s -X POST "$API/orders" -H 'Content-Type: application/json' -d "$BODY" | sed -E 's/.*"id":"([^"]+)".*/\1/'; }
-status_of() { curl -s "$API/orders/$1" | sed -E 's/.*"status":"([A-Z]+)".*/\1/'; }
+status_of() { curl -s "$API/orders/$1" | sed -E 's/.*"status":"([a-z_]+)".*/\1/'; }
 queues()    { docker compose exec -T rabbitmq rabbitmqctl list_queues -q name messages; }
 
 case "${1:-}" in
@@ -38,7 +38,7 @@ retries)
   docker compose logs worker --since 20s | grep -E 'will retry|dead-letter' || true
   title "Colas: notifications.send.dlq tiene el mensaje"
   queues
-  title "El pedido igual se CONFIRMÓ: el worker de pedidos es independiente"
+  title "El pedido igual quedó listo para despacho: el worker de pedidos es independiente"
   echo "estado: $(status_of "$ID")"
   title "Restauro el worker (NOTIFIER_FAILURE_RATE=0.3)"
   docker compose up -d worker
@@ -48,7 +48,7 @@ worker-down)
   title "Detengo el worker"
   docker compose stop worker
   ID=$(new_order); echo "pedido: $ID"
-  title "La API respondió igual. El pedido espera en PENDING y el mensaje espera en la cola"
+  title "La API respondió igual. El pedido espera en en_preparacion y el mensaje espera en la cola"
   echo "estado: $(status_of "$ID")"
   queues
   title "Levanto el worker: procesa lo pendiente"

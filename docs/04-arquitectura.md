@@ -19,13 +19,13 @@ flowchart LR
     API -->|"1. guarda el pedido"| PG
     API -->|"2. publica order.created"| MQ
     MQ -->|entrega| W
-    W -->|"confirma pedido<br/>registra notificación"| PG
+    W -->|"deja el pedido listo para despacho<br/>registra notificación"| PG
 ```
 
 | Componente | Qué hace |
 |---|---|
 | **API** | Recibe pedidos, los valida, los guarda y publica el evento. Responde sin esperar al worker |
-| **Worker** | Dos consumidores: `order-processor` (pasa el pedido a `CONFIRMED`) y `notifier` (email simulado) |
+| **Worker** | Dos consumidores: `order-processor` (pasa el pedido a `listo_para_despacho`) y `notifier` (email simulado) |
 | **PostgreSQL** | Guarda pedidos, artículos y notificaciones enviadas |
 | **RabbitMQ** | Transporta los eventos; guarda en una `.dlq` los que no se pudieron procesar |
 
@@ -35,8 +35,8 @@ La API y el worker salen del **mismo código y la misma imagen Docker**, pero co
 
 ```mermaid
 flowchart TB
-    P["presentation<br/>handler HTTP · consumer de mensajes"] --> A["application<br/>casos de uso: CreateOrder, GetOrder, ConfirmOrder"]
-    A --> D["domain<br/>Order, reglas, interfaces OrderRepository y EventPublisher"]
+    P["presentation<br/>handler HTTP · consumer de mensajes"] --> A["application<br/>casos de uso: CreateOrder, GetOrder, ChangeStatus, MarkReady"]
+    A --> D["domain<br/>Order, RUT, estados y transiciones, interfaces OrderRepository y EventPublisher"]
     I["infrastructure<br/>PostgreSQL, RabbitMQ"] -. implementa .-> D
 ```
 
@@ -70,7 +70,7 @@ sequenceDiagram
     else pedido nuevo
         DB-->>UC: guardado
         UC->>MQ: publica order.created y espera confirmación
-        UC-->>C: 201 PENDING
+        UC-->>C: 201 en_preparacion
     end
 ```
 
@@ -86,10 +86,10 @@ sequenceDiagram
     par cola orders.processing
         MQ->>OP: order.created
         OP->>DB: SELECT ... FOR UPDATE
-        alt ya estaba CONFIRMED (duplicado)
+        alt ya no está en_preparacion (duplicado o movido a mano)
             OP->>MQ: ACK sin cambios
-        else PENDING
-            OP->>DB: UPDATE status = CONFIRMED
+        else en_preparacion
+            OP->>DB: UPDATE status = listo_para_despacho
             OP->>MQ: ACK
         end
     and cola notifications.send
@@ -122,9 +122,19 @@ flowchart LR
 
 ```mermaid
 stateDiagram-v2
-    [*] --> PENDING: POST /orders
-    PENDING --> CONFIRMED: el worker procesa order.created
+    [*] --> en_preparacion: POST /orders
+    en_preparacion --> listo_para_despacho: el worker procesa order.created
+    listo_para_despacho --> en_transito: PATCH
+    en_transito --> entregado: PATCH
+    en_transito --> no_entregado: PATCH
+    no_entregado --> en_transito: PATCH (reintento)
+    no_entregado --> devuelto: PATCH
+    entregado --> devuelto: PATCH
+    devuelto --> [*]
 ```
+
+Los cambios por `PATCH /orders/{id}/status` pasan por `Order.TransitionTo`, que rechaza con `409` cualquier salto
+que no esté en el diagrama. Las reglas están en `internal/orders/domain/status.go`.
 
 ## Base de datos
 
@@ -133,9 +143,9 @@ erDiagram
     orders ||--|{ order_items : contiene
     orders {
         uuid id PK
-        text customer_id
-        text status "PENDING o CONFIRMED"
-        bigint total_cents
+        text customer_id "RUT, p. ej. 12345678-5"
+        text status "uno de los 6 estados (CHECK)"
+        bigint total
         text idempotency_key UK "puede ser NULL"
         timestamptz created_at
         timestamptz updated_at
@@ -145,7 +155,7 @@ erDiagram
         int position PK
         text sku
         int quantity
-        bigint unit_price_cents
+        bigint unit_price
     }
     notifications {
         uuid id PK
@@ -178,7 +188,7 @@ Formato del evento (`pkg/events/events.go`):
   "occurred_at": "2026-11-16T12:00:00.123456Z",
   "correlation_id": "9e15… (request_id del POST)",
   "order_id": "4f1c…",
-  "customer_id": "customer-42",
-  "total_cents": 3999
+  "customer_id": "12345678-5",
+  "total": 21970, "currency": "CLP"
 }
 ```

@@ -17,12 +17,13 @@ import (
 )
 
 type OrderHandler struct {
-	create *usecase.CreateOrderUseCase
-	get    *usecase.GetOrderUseCase
+	create       *usecase.CreateOrderUseCase
+	get          *usecase.GetOrderUseCase
+	changeStatus *usecase.ChangeStatusUseCase
 }
 
-func NewOrderHandler(create *usecase.CreateOrderUseCase, get *usecase.GetOrderUseCase) *OrderHandler {
-	return &OrderHandler{create: create, get: get}
+func NewOrderHandler(create *usecase.CreateOrderUseCase, get *usecase.GetOrderUseCase, changeStatus *usecase.ChangeStatusUseCase) *OrderHandler {
+	return &OrderHandler{create: create, get: get, changeStatus: changeStatus}
 }
 
 // Create maneja POST /orders.
@@ -54,6 +55,26 @@ func (h *OrderHandler) Create(c *gin.Context) {
 // Get maneja GET /orders/:id.
 func (h *OrderHandler) Get(c *gin.Context) {
 	order, err := h.get.Execute(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		httputil.RespondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, order)
+}
+
+// ChangeStatus maneja PATCH /orders/:id/status con cuerpo {"status": "en_transito"}.
+//
+//	200 -> pedido actualizado
+//	400 -> JSON inválido, id que no es UUID o estado desconocido
+//	404 -> el pedido no existe
+//	409 -> ese cambio de estado no está permitido
+func (h *OrderHandler) ChangeStatus(c *gin.Context) {
+	var req dto.ChangeStatusRequest
+	if err := decodeJSON(c, &req); err != nil {
+		httputil.RespondError(c, err)
+		return
+	}
+	order, err := h.changeStatus.Execute(c.Request.Context(), c.Param("id"), req)
 	if err != nil {
 		httputil.RespondError(c, err)
 		return

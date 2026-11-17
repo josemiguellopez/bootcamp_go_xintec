@@ -81,11 +81,14 @@ type FakePublisher struct {
 	Err    error
 }
 
-func (p *FakePublisher) PublishOrderCreated(_ context.Context, e domain.OrderCreated) error {
+func (p *FakePublisher) PublishOrderCreated(ctx context.Context, e domain.OrderCreated) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.Err != nil {
 		return p.Err
+	}
+	if err := ctx.Err(); err != nil { // como el real: con el contexto cancelado no publica
+		return err
 	}
 	p.Events = append(p.Events, e)
 	return nil

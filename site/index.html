@@ -1,0 +1,408 @@
+<!doctype html>
+<html lang="es" style="background: #161a2e">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>EventFlow en vivo</title>
+    <meta name="description" content="Haga un pedido, búsquelo y pruebe cada requisito del desafío EventFlow (Bootcamp Go XINTEC) contra la API en Go." />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232a2f4f'/%3E%3Cpath d='M9 7v15l4-3.6 2.7 6.1 2.6-1.1-2.6-6h5.5z' fill='%23f23d49'/%3E%3C/svg%3E" />
+    <!-- Antes de pintar nada: sección elegida (#pedido, #buscar…) y tamaño de letra.
+         Junto con el fondo puesto en <html>, la página nunca se ve un instante en blanco
+         ni con la sección equivocada. -->
+    <script>
+      (function () {
+        var views = ["pedido", "buscar", "pruebas", "como"];
+        var hash = location.hash.slice(1);
+        document.documentElement.dataset.view = views.indexOf(hash) >= 0 ? hash : "pedido";
+        try {
+          if (localStorage.getItem("eventflow-big") === "1") document.documentElement.classList.add("big");
+        } catch (e) {}
+        // La intro: una vez por visita y nunca con "reducir movimiento".
+        // "fresh": la sección todavía no la construyeron los agentes en esta visita, así que
+        // sus piezas se pintan desde el principio como planos (líneas punteadas) que ellos rellenan.
+        try {
+          var calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+          if (!calm && !sessionStorage.getItem("eventflow-intro-visto")) {
+            sessionStorage.setItem("eventflow-intro-visto", "1");
+            document.documentElement.classList.add("with-intro");
+          }
+          var built = JSON.parse(sessionStorage.getItem("eventflow-construido") || "[]");
+          if (!calm && built.indexOf(document.documentElement.dataset.view) < 0) {
+            document.documentElement.classList.add("fresh");
+          }
+        } catch (e) {}
+      })();
+    </script>
+    <!-- El CSS va enlazado aquí (no importado desde JavaScript): el navegador lo carga
+         antes de mostrar la página, así no hay "pestañeo" sin estilos. -->
+    <link rel="stylesheet" href="/src/style.css" />
+    <link rel="stylesheet" href="/src/tienda.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&family=Open+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Courier+Prime:wght@400;700&family=VT323&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <a class="skip" href="#contenido">Saltar al contenido</a>
+
+    <!-- La tienda de fondo: pared con estanterías, lámparas, piso y bots que pasean (src/scene.js). -->
+    <div class="scene" aria-hidden="true">
+      <div class="scene-shelves"></div>
+      <div class="scene-ceiling"></div>
+      <div class="scene-floor"></div>
+    </div>
+
+    <!-- Entrada corta: plano tipo AutoCAD que se vuelve 3D (src/intro.js). Una vez por visita. -->
+    <div class="intro" id="intro">
+      <div class="blueprint" aria-hidden="true"></div>
+      <div class="intro-stage" aria-hidden="true">
+        <p class="intro-title">Plano de la tienda · los agentes bot están dibujando</p>
+        <div class="intro-pieces"></div>
+        <div class="intro-name">
+          <span class="intro-word">EventFlow</span>
+          <span class="intro-sub">Bootcamp Go · XINTEC</span>
+        </div>
+      </div>
+      <div class="intro-cursors" aria-hidden="true"></div>
+      <p class="cad-coords" aria-hidden="true">X 0.000   Y 0.000</p>
+      <button class="intro-skip" type="button">Saltar ›</button>
+    </div>
+
+    <div class="app">
+      <header class="topbar">
+        <div class="wrap topbar-inner">
+          <a class="brand" href="#pedido">
+            <span class="brand-mark" aria-hidden="true"></span>
+            <span class="brand-text"><span class="brand-name">EventFlow</span><span class="brand-sub">Bootcamp Go · XINTEC</span></span>
+          </a>
+          <div class="topbar-tools">
+            <button class="conn" id="conn" type="button">
+              <span class="conn-dot" aria-hidden="true"></span><span class="conn-text">Conectando…</span>
+            </button>
+            <button class="tool-btn" id="sound" type="button" aria-pressed="true" title="Activar o silenciar el sonido de la impresora">
+              <span aria-hidden="true">🔊</span><span class="tool-label">Sonido</span>
+            </button>
+            <button class="tool-btn" id="text-size" type="button" aria-pressed="false" title="Agrandar o achicar la letra">A+</button>
+          </div>
+        </div>
+        <nav class="tabs-nav" aria-label="Secciones">
+          <div class="wrap tabs-nav-inner">
+            <a class="nav-tab" href="#pedido" data-view="pedido"><span class="nav-num" aria-hidden="true">1</span>Hacer un pedido</a>
+            <a class="nav-tab" href="#buscar" data-view="buscar"><span class="nav-num" aria-hidden="true">2</span>Buscar un pedido</a>
+            <a class="nav-tab" href="#pruebas" data-view="pruebas"><span class="nav-num" aria-hidden="true">3</span>Resultado del desafío</a>
+            <a class="nav-tab" href="#como" data-view="como"><span class="nav-num" aria-hidden="true">?</span>Cómo funciona</a>
+          </div>
+        </nav>
+      </header>
+
+      <main id="contenido" class="wrap main">
+        <!-- ============================================================ HACER PEDIDO -->
+        <section class="view" id="pedido" aria-labelledby="pedido-title">
+          <header class="view-head">
+            <h1 id="pedido-title" data-build="text">Hacer un pedido</h1>
+            <p>Complete los tres pasos y pulse «Enviar pedido». La impresora térmica imprimirá su boleta.</p>
+          </header>
+
+          <div class="order-layout">
+            <div class="order-main">
+              <!-- El formulario: tres pasos, uno debajo del otro. -->
+              <form class="card order-form" id="order-form" novalidate data-build="rect" data-name="Formulario de pedido" data-say="armando el formulario…">
+                <!-- ¿Quién arma el pedido? Usted, o un agente bot que lo hace a la vista. -->
+                <div class="mode" data-build="rect" data-name="Selector">
+                  <p class="mode-title" id="mode-title">¿Quién arma el pedido?</p>
+                  <div class="mode-switch" role="radiogroup" aria-labelledby="mode-title">
+                    <button class="mode-opt" id="mode-me" type="button" role="radio" aria-checked="true">
+                      <span aria-hidden="true">🙋</span> Lo hago yo
+                    </button>
+                    <button class="mode-opt" id="mode-agent" type="button" role="radio" aria-checked="false">
+                      <span aria-hidden="true">🤖</span> Que lo haga un agente
+                    </button>
+                  </div>
+                  <p class="mode-help" id="mode-help" aria-live="polite">Siga los 3 pasos de abajo.</p>
+                </div>
+
+                <fieldset class="step" id="step-rut">
+                  <legend class="step-head"><span class="step-kicker">Paso 1 de 3</span><span class="step-title">Escriba su RUT</span></legend>
+                  <label class="field-label" for="customer">RUT del cliente</label>
+                  <div class="rut-field">
+                    <input class="input" id="customer" type="text" placeholder="12.345.678-5" maxlength="14" autocomplete="off" spellcheck="false" aria-describedby="customer-help" />
+                    <span class="rut-mark" aria-hidden="true"></span>
+                  </div>
+                  <p class="field-help" id="customer-help" aria-live="polite">Con o sin puntos y con guion, por ejemplo 12.345.678-5.</p>
+                </fieldset>
+
+                <fieldset class="step" id="step-products">
+                  <legend class="step-head"><span class="step-kicker">Paso 2 de 3</span><span class="step-title">Elija productos</span></legend>
+                  <p class="step-help">Use <strong>+</strong> para agregar y <strong>−</strong> para quitar.</p>
+                  <ul class="catalog" id="catalog"></ul>
+                </fieldset>
+
+                <fieldset class="step" id="step-send">
+                  <legend class="step-head"><span class="step-kicker">Paso 3 de 3</span><span class="step-title">Revise y envíe</span></legend>
+                  <ul class="summary-lines" id="cart-lines"></ul>
+                </fieldset>
+
+                <!-- El carrito: los productos vuelan al canasto y quedan detrás de la rejilla.
+                     Va fuera del paso 3, como hijo directo del formulario: así queda fijo
+                     abajo de la pantalla mientras se eligen productos, con el botón de enviar a mano. -->
+                <div class="cart-bar">
+                  <div class="cart-basket" aria-hidden="true">
+                    <span class="cart-handle"></span>
+                    <span class="cart-back"></span>
+                    <div class="cart-items" id="cart-items"></div>
+                    <span class="cart-front"></span>
+                    <span class="cart-wheel w1"></span><span class="cart-wheel w2"></span>
+                  </div>
+                  <div class="summary-total">
+                    <span>Total <small id="cart-count">(vacío)</small></span>
+                    <strong id="total">$0</strong>
+                  </div>
+                  <div class="cart-send">
+                    <button class="btn primary big wide" id="send" type="submit">Enviar pedido</button>
+                    <p class="send-hint" id="cart-hint" aria-live="polite"></p>
+                  </div>
+                </div>
+              </form>
+
+
+              <!-- Después de enviar: el formulario se esconde y se ofrece empezar otro pedido. -->
+              <div class="card order-done" id="order-done" hidden tabindex="-1" aria-labelledby="done-title">
+                <span class="done-icon" aria-hidden="true">✓</span>
+                <h2 id="done-title">¡Pedido enviado!</h2>
+                <p class="done-number">Número de pedido: <strong class="mono" id="done-id"></strong></p>
+                <p class="done-text">Su boleta se está imprimiendo. Abajo puede ver qué está haciendo el sistema con su pedido.</p>
+                <div class="done-question">
+                  <p><strong>¿Desea crear un nuevo pedido?</strong></p>
+                  <div class="done-actions">
+                    <button class="btn primary big" id="new-order" type="button">Sí, crear un nuevo pedido</button>
+                    <button class="btn big" id="done-copy" type="button">Copiar número</button>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+
+            <div class="order-extra">
+              <!-- Qué pasa con el pedido: aparece al enviar el primero. -->
+              <section class="card progress" id="progress" hidden aria-labelledby="progress-title">
+                <h2 class="card-title" id="progress-title">Qué está pasando con su pedido</h2>
+                <p class="progress-caption" id="track-caption" aria-live="polite">Esperando su pedido.</p>
+                <ol class="stations" id="stations">
+                  <li class="station" data-step="cliente"><span class="st-icon" aria-hidden="true">1</span><span class="st-body"><strong>Usted envía el pedido</strong><span class="st-state">esperando</span></span><span class="tag">Cliente</span></li>
+                  <li class="station" data-step="api"><span class="st-icon" aria-hidden="true">2</span><span class="st-body"><strong>El sistema revisa que esté bien</strong><span class="st-state">esperando</span></span><span class="tag">API en Go</span></li>
+                  <li class="station" data-step="postgres"><span class="st-icon" aria-hidden="true">3</span><span class="st-body"><strong>Se guarda para no perderlo</strong><span class="st-state">esperando</span></span><span class="tag">PostgreSQL</span></li>
+                  <li class="station" data-step="rabbit"><span class="st-icon" aria-hidden="true">4</span><span class="st-body"><strong>Se avisa a los trabajadores</strong><span class="st-state">esperando</span></span><span class="tag">RabbitMQ</span></li>
+                  <li class="station" data-step="worker"><span class="st-icon" aria-hidden="true">5</span><span class="st-body"><strong>Un trabajador lo deja listo para despacho</strong><span class="st-state">esperando</span></span><span class="tag">Worker</span></li>
+                  <li class="station" data-step="email"><span class="st-icon" aria-hidden="true">6</span><span class="st-body"><strong>Se le envía un correo</strong><span class="st-state">esperando</span></span><span class="tag">Email</span></li>
+                </ol>
+              </section>
+
+              <details class="console">
+                <summary><span id="console-title">Detalles técnicos (para programadores)</span></summary>
+                <div class="console-head">
+                  <span>Peticiones a la API y sus respuestas</span>
+                  <button class="link-btn" id="console-clear" type="button">Limpiar</button>
+                </div>
+                <div class="log" id="log" role="log"></div>
+              </details>
+            </div>
+
+            <!-- La impresora térmica de la caja: de aquí sale la boleta. -->
+            <aside class="order-side" aria-labelledby="printer-title">
+              <div class="printer-head">
+                <h2 class="card-title" id="printer-title" data-build="text">Impresora térmica de boletas</h2>
+                <p>Imprime el comprobante de su pedido en papel térmico, como en la caja de una tienda.</p>
+              </div>
+              <div class="printer" id="printer" aria-hidden="true" data-build="rect" data-name="Impresora" data-say="armando la impresora…">
+                <div class="printer-body">
+                  <div class="printer-top">
+                    <span class="printer-window" data-build="rect" data-name="Rollo de papel"><span class="printer-roll"></span></span>
+                    <span class="printer-plate" data-build="rect" data-name="Placa"><strong>IMPRESORA TÉRMICA</strong><small>EventFlow TP-80</small></span>
+                    <span class="printer-vents" data-build="rect" data-name="Rejilla"></span>
+                  </div>
+                  <div class="printer-face">
+                    <span class="printer-lcd" data-build="rect" data-name="Pantalla LCD"><span class="printer-lcd-text" data-build="text">EN ESPERA</span></span>
+                    <span class="printer-leds" data-build="rect" data-name="Luces">
+                      <span class="led power"></span><small>POWER</small>
+                      <span class="led paper"></span><small>PAPER</small>
+                    </span>
+                    <span class="printer-feed" data-build="rect" data-name="Botón">FEED</span>
+                  </div>
+                </div>
+                <div class="printer-mouth" data-build="rect" data-name="Cuchilla"><span class="printer-cutter"></span></div>
+              </div>
+              <div class="receipt" id="receipt" data-state="empty" aria-live="polite">
+                <p class="receipt-empty">Aquí saldrá su <strong>boleta</strong> cuando envíe el pedido.</p>
+              </div>
+            </aside>
+          </div>
+        </section>
+
+        <!-- ============================================================ BUSCAR PEDIDO -->
+        <section class="view" id="buscar" aria-labelledby="buscar-title">
+          <header class="view-head">
+            <h1 id="buscar-title" data-build="text">Buscar un pedido</h1>
+            <p>Escriba o pegue el número de pedido y pulse «Buscar». Verá su boleta con el estado actual.</p>
+          </header>
+          <form class="card search-panel" id="search" data-build="rect" data-name="Buscador">
+            <label class="field-label" for="search-id">Número de pedido</label>
+            <div class="search-row">
+              <input class="input mono" id="search-id" type="text" placeholder="por ejemplo 4f1c2a8e-6a8e-4e0f-9b43-6a1f1d1f6c11" autocomplete="off" spellcheck="false" />
+              <button class="btn primary big" type="submit">Buscar</button>
+            </div>
+            <button class="link-btn" id="search-last" type="button">Usar mi último pedido</button>
+          </form>
+
+          <div class="search-layout">
+            <!-- El archivo de pedidos (PostgreSQL): un archivador con cajones. El agente abre el cajón
+                 que corresponde, revisa las fichas y saca la del pedido (src/search.js). -->
+            <section class="card dig" id="dig" data-build="rect" data-name="Archivo de pedidos" data-say="armando el archivador…" aria-labelledby="dig-title">
+              <header class="dig-head">
+                <span class="dig-db" aria-hidden="true"></span>
+                <div>
+                  <h2 class="card-title" id="dig-title">Archivo de pedidos</h2>
+                  <p class="dig-sub">La base de datos guarda cada pedido como una ficha, ordenada por su número en cajones. El agente la busca cajón por cajón.</p>
+                </div>
+              </header>
+              <div class="cabinet" id="cabinet" aria-hidden="true">
+                <div class="drawer" data-range="01234">
+                  <div class="drawer-front"><span class="drawer-label">0 – 4</span><span class="drawer-handle"></span></div>
+                  <div class="drawer-box"><div class="fcards"></div></div>
+                </div>
+                <div class="drawer" data-range="56789">
+                  <div class="drawer-front"><span class="drawer-label">5 – 9</span><span class="drawer-handle"></span></div>
+                  <div class="drawer-box"><div class="fcards"></div></div>
+                </div>
+                <div class="drawer" data-range="abcdef">
+                  <div class="drawer-front"><span class="drawer-label">a – f</span><span class="drawer-handle"></span></div>
+                  <div class="drawer-box"><div class="fcards"></div></div>
+                </div>
+              </div>
+              <p class="dig-caption" id="dig-caption" aria-live="polite">Escriba un número de pedido y pulse «Buscar».</p>
+              <details class="dig-tech">
+                <summary>Ver cómo es en la base de datos (para programadores)</summary>
+                <pre class="dig-sql" id="dig-sql" aria-label="Consulta SQL"><span class="sql-k">SELECT</span> * <span class="sql-k">FROM</span> orders <span class="sql-k">WHERE</span> id = <span class="sql-v">…</span>;</pre>
+                <p>Aquí el agente busca cajón por cajón para que se vea. PostgreSQL de verdad es más rápido: usa el índice <code>orders_pkey</code> (un árbol B), que lo lleva directo al lugar donde debería estar la fila, sin revisar los demás cajones ni toda la tabla.</p>
+              </details>
+            </section>
+
+            <aside class="search-side" aria-label="Boleta encontrada">
+              <div class="printer" id="printer-search" aria-hidden="true" data-build="rect" data-name="Impresora" data-say="armando otra impresora…">
+                <div class="printer-body">
+                  <div class="printer-top">
+                    <span class="printer-window" data-build="rect" data-name="Rollo de papel"><span class="printer-roll"></span></span>
+                    <span class="printer-plate" data-build="rect" data-name="Placa"><strong>IMPRESORA TÉRMICA</strong><small>EventFlow TP-80</small></span>
+                    <span class="printer-vents" data-build="rect" data-name="Rejilla"></span>
+                  </div>
+                  <div class="printer-face">
+                    <span class="printer-lcd" data-build="rect" data-name="Pantalla LCD"><span class="printer-lcd-text" data-build="text">EN ESPERA</span></span>
+                    <span class="printer-leds" data-build="rect" data-name="Luces">
+                      <span class="led power"></span><small>POWER</small>
+                      <span class="led paper"></span><small>PAPER</small>
+                    </span>
+                    <span class="printer-feed" data-build="rect" data-name="Botón">FEED</span>
+                  </div>
+                </div>
+                <div class="printer-mouth" data-build="rect" data-name="Cuchilla"><span class="printer-cutter"></span></div>
+              </div>
+              <div class="search-result" id="search-result" aria-live="polite"></div>
+            </aside>
+          </div>
+        </section>
+
+        <!-- ============================================================ PRUEBAS DEL PDF -->
+        <section class="view" id="pruebas" aria-labelledby="pruebas-title">
+          <header class="view-head">
+            <h1 id="pruebas-title" data-build="text">Resultado del desafío</h1>
+            <p>Cada requisito del PDF tiene su prueba. Pulse «Probar todo» y elija cómo verlo: un resumen simple, o el técnico con toda la evidencia.</p>
+          </header>
+          <div class="card checks-bar" data-build="rect" data-name="Panel de pruebas">
+            <button class="btn primary big" id="run-all" type="button">Probar todo</button>
+            <p class="checks-summary" id="checks-summary" aria-live="polite">Todavía no se ha probado nada.</p>
+            <button class="btn" id="copy-report" type="button" title="Copia un informe en Markdown con el resultado y la evidencia">Copiar informe</button>
+          </div>
+          <div class="tabs" role="tablist" aria-label="Forma de ver el resultado">
+            <button class="tab" id="tab-simple" role="tab" type="button" aria-selected="true" aria-controls="checks-simple">
+              <strong>Resumen simple</strong><span>Para cualquier persona</span>
+            </button>
+            <button class="tab" id="tab-tech" role="tab" type="button" aria-selected="false" aria-controls="checks-tech" tabindex="-1">
+              <strong>Resumen técnico</strong><span>Evidencia, código y pruebas en Go</span>
+            </button>
+          </div>
+          <div class="tabpanel" id="checks-simple" role="tabpanel" aria-labelledby="tab-simple"></div>
+          <div class="tabpanel" id="checks-tech" role="tabpanel" aria-labelledby="tab-tech" hidden></div>
+        </section>
+
+        <!-- ============================================================ CÓMO FUNCIONA -->
+        <section class="view" id="como" aria-labelledby="como-title">
+          <header class="view-head">
+            <h1 id="como-title" data-build="text">Cómo funciona</h1>
+            <p>Cada pedido pasa por seis piezas del sistema construido en Go. Cada una tiene un agente bot con su color.</p>
+          </header>
+          <ol class="flow" aria-label="Recorrido de un pedido" data-build="rect" data-name="Recorrido">
+            <li style="--c: var(--a-cliente)">Usted</li>
+            <li style="--c: var(--a-api)">API en Go</li>
+            <li style="--c: var(--a-postgres)">PostgreSQL</li>
+            <li style="--c: var(--a-rabbit)">RabbitMQ</li>
+            <li style="--c: var(--a-worker)">Worker</li>
+            <li style="--c: var(--a-email)">Email</li>
+          </ol>
+          <div class="agents-grid">
+            <article class="agent-card" data-build="rect" data-name="Tarjeta" style="--c: var(--a-cliente)">
+              <span class="agent-bot" data-bot aria-hidden="true"></span>
+              <span class="tag">Cliente</span>
+              <h3>Arma y envía</h3>
+              <p>Envía el pedido con su RUT y una clave única, para poder reintentar sin crear duplicados.</p>
+            </article>
+            <article class="agent-card" data-build="rect" data-name="Tarjeta" style="--c: var(--a-api)">
+              <span class="agent-bot" data-bot aria-hidden="true"></span>
+              <span class="tag">API en Go</span>
+              <h3>Revisa y responde</h3>
+              <p>Comprueba que el pedido tenga sentido y responde en milisegundos con un número de pedido.</p>
+            </article>
+            <article class="agent-card" data-build="rect" data-name="Tarjeta" style="--c: var(--a-postgres)">
+              <span class="agent-bot" data-bot aria-hidden="true"></span>
+              <span class="tag">PostgreSQL</span>
+              <h3>Guarda</h3>
+              <p>Guarda el pedido en la base de datos para que no se pierda aunque el sistema se reinicie.</p>
+            </article>
+            <article class="agent-card" data-build="rect" data-name="Tarjeta" style="--c: var(--a-rabbit)">
+              <span class="agent-bot" data-bot aria-hidden="true"></span>
+              <span class="tag">RabbitMQ</span>
+              <h3>Avisa</h3>
+              <p>Recibe el aviso «se creó un pedido» y lo reparte a cada trabajador que lo necesita.</p>
+            </article>
+            <article class="agent-card" data-build="rect" data-name="Tarjeta" style="--c: var(--a-worker)">
+              <span class="agent-bot" data-bot aria-hidden="true"></span>
+              <span class="tag">Worker</span>
+              <h3>Prepara</h3>
+              <p>Trabaja en segundo plano y deja el pedido listo para despacho. Si algo falla, lo reintenta.</p>
+            </article>
+            <article class="agent-card" data-build="rect" data-name="Tarjeta" style="--c: var(--a-email)">
+              <span class="agent-bot" data-bot aria-hidden="true"></span>
+              <span class="tag">Email</span>
+              <h3>Notifica</h3>
+              <p>Envía un correo de prueba. Si el proveedor falla, reintenta esperando cada vez un poco más.</p>
+            </article>
+          </div>
+        </section>
+      </main>
+
+      <!-- El minimarket: un mini videojuego isométrico de fondo (src/market.js). Solo decoración. -->
+      <section class="market" aria-label="Minimarket animado (decoración)">
+        <p class="market-title"><span aria-hidden="true">🛒</span> Minimarket EventFlow · en vivo</p>
+        <canvas id="market" role="img" aria-label="Clientes comprando en un minimarket, atendidos por agentes bot"></canvas>
+      </section>
+
+      <footer class="footer">
+        <div class="wrap">Hecho con Go en el Bootcamp de XINTEC · Desafío EventFlow</div>
+      </footer>
+    </div>
+
+    <!-- Capa de los cursores de los agentes (encima de todo, no recibe clics). -->
+    <div class="cursors" id="cursors" aria-hidden="true"></div>
+    <!-- Avisos breves ("Copiado", etc.). -->
+    <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

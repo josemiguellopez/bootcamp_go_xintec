@@ -1,0 +1,890 @@
+{
+  "info": {
+    "name": "EventFlow",
+    "description": "Peticiones para probar la API de pedidos de EventFlow. Tutorial: docs/05-postman.md. Requiere el sistema levantado con `docker compose up -d --build`.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3200"
+    },
+    {
+      "key": "workerUrl",
+      "value": "http://localhost:3201"
+    },
+    {
+      "key": "orderId",
+      "value": ""
+    },
+    {
+      "key": "idempotencyKey",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Flujo principal",
+      "description": "Ejecutar en orden: crea un pedido, lo repite con la misma clave y lo consulta.",
+      "item": [
+        {
+          "name": "Crear pedido → 201",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Genera una Idempotency-Key nueva cada vez que se ejecuta esta petición.",
+                  "pm.collectionVariables.set('idempotencyKey', 'pedido-' + Date.now());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 201 Created', () => pm.response.to.have.status(201));",
+                  "",
+                  "const order = pm.response.json();",
+                  "pm.test('El pedido nace en_preparacion', () => pm.expect(order.status).to.eql('en_preparacion'));",
+                  "pm.test('El total es 2 × $8.990 + $3.990 = $21.970', () => pm.expect(order.total).to.eql(21970));",
+                  "pm.test('La moneda es pesos chilenos (CLP)', () => pm.expect(order.currency).to.eql('CLP'));",
+                  "pm.test('Devuelve la cabecera X-Request-ID', () => pm.response.to.have.header('X-Request-ID'));",
+                  "pm.test('Devuelve las cabeceras de seguridad', () => {",
+                  "  pm.response.to.have.header('X-Content-Type-Options', 'nosniff');",
+                  "  pm.response.to.have.header('X-Frame-Options', 'DENY');",
+                  "});",
+                  "",
+                  "// Guardamos el id para las siguientes peticiones.",
+                  "pm.collectionVariables.set('orderId', order.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_id\": \"12345678-5\",\n  \"items\": [\n    { \"sku\": \"SKU-1\", \"quantity\": 2, \"unit_price\": 8990 },\n    { \"sku\": \"SKU-2\", \"quantity\": 1, \"unit_price\": 3990 }\n  ]\n}"
+            },
+            "url": "{{baseUrl}}/orders"
+          }
+        },
+        {
+          "name": "Repetir con la misma Idempotency-Key → 200",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Simula un cliente que no recibió respuesta y reintenta.",
+                  "pm.test('Responde 200 OK (no 201): no se creó otro pedido', () => pm.response.to.have.status(200));",
+                  "pm.test('Devuelve el MISMO pedido', () => pm.expect(pm.response.json().id).to.eql(pm.collectionVariables.get('orderId')));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_id\": \"12345678-5\",\n  \"items\": [\n    { \"sku\": \"SKU-1\", \"quantity\": 2, \"unit_price\": 8990 },\n    { \"sku\": \"SKU-2\", \"quantity\": 1, \"unit_price\": 3990 }\n  ]\n}"
+            },
+            "url": "{{baseUrl}}/orders"
+          }
+        },
+        {
+          "name": "Consultar pedido → 200",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 200 OK', () => pm.response.to.have.status(200));",
+                  "",
+                  "const order = pm.response.json();",
+                  "pm.test('Es el pedido creado', () => pm.expect(order.id).to.eql(pm.collectionVariables.get('orderId')));",
+                  "// Justo después de crearlo puede seguir en_preparacion; tras un segundo el worker lo pasa a listo_para_despacho.",
+                  "pm.test('Estado en_preparacion o listo_para_despacho', () => pm.expect(order.status).to.be.oneOf(['en_preparacion', 'listo_para_despacho']));",
+                  "console.log('Estado actual del pedido:', order.status);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/orders/{{orderId}}"
+          }
+        },
+        {
+          "name": "Crear sin Idempotency-Key → 201 (pedido nuevo)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Sin la cabecera no hay protección: cada POST crea un pedido distinto.",
+                  "pm.test('Responde 201 Created', () => pm.response.to.have.status(201));",
+                  "pm.test('Es un pedido distinto al anterior', () => pm.expect(pm.response.json().id).to.not.eql(pm.collectionVariables.get('orderId')));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_id\": \"12345678-5\",\n  \"items\": [\n    { \"sku\": \"SKU-1\", \"quantity\": 1, \"unit_price\": 2990 }\n  ]\n}"
+            },
+            "url": "{{baseUrl}}/orders"
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Validaciones (400 / 413)",
+      "description": "Peticiones inválidas. Ninguna crea un pedido.",
+      "item": [
+        {
+          "name": "RUT inválido → 400 ORDER_INVALID_CUSTOMER",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Código ORDER_INVALID_CUSTOMER', () => pm.expect(pm.response.json().error.code).to.eql('ORDER_INVALID_CUSTOMER'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_id\": \"12345678-9\",\n  \"items\": [ { \"sku\": \"SKU-1\", \"quantity\": 1, \"unit_price\": 8990 } ]\n}"
+            },
+            "url": "{{baseUrl}}/orders"
+          }
+        },
+        {
+          "name": "Sin artículos → 400 ORDER_EMPTY_ITEMS",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Código ORDER_EMPTY_ITEMS', () => pm.expect(pm.response.json().error.code).to.eql('ORDER_EMPTY_ITEMS'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_id\": \"12345678-5\",\n  \"items\": []\n}"
+            },
+            "url": "{{baseUrl}}/orders"
+          }
+        },
+        {
+          "name": "SKU vacío → 400 ORDER_INVALID_SKU",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Código ORDER_INVALID_SKU', () => pm.expect(pm.response.json().error.code).to.eql('ORDER_INVALID_SKU'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_id\": \"12345678-5\",\n  \"items\": [ { \"sku\": \"\", \"quantity\": 1, \"unit_price\": 8990 } ]\n}"
+            },
+            "url": "{{baseUrl}}/orders"
+          }
+        },
+        {
+          "name": "Cantidad 0 → 400 ORDER_INVALID_QUANTITY",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Código ORDER_INVALID_QUANTITY', () => pm.expect(pm.response.json().error.code).to.eql('ORDER_INVALID_QUANTITY'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_id\": \"12345678-5\",\n  \"items\": [ { \"sku\": \"SKU-1\", \"quantity\": 0, \"unit_price\": 8990 } ]\n}"
+            },
+            "url": "{{baseUrl}}/orders"
+          }
+        },
+        {
+          "name": "Precio negativo → 400 ORDER_INVALID_PRICE",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Código ORDER_INVALID_PRICE', () => pm.expect(pm.response.json().error.code).to.eql('ORDER_INVALID_PRICE'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_id\": \"12345678-5\",\n  \"items\": [ { \"sku\": \"SKU-1\", \"quantity\": 1, \"unit_price\": -5 } ]\n}"
+            },
+            "url": "{{baseUrl}}/orders"
+          }
+        },
+        {
+          "name": "JSON mal formado → 400 INVALID_JSON",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Código INVALID_JSON', () => pm.expect(pm.response.json().error.code).to.eql('INVALID_JSON'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"customer_id\": "
+            },
+            "url": "{{baseUrl}}/orders"
+          }
+        },
+        {
+          "name": "Campo desconocido → 400 INVALID_JSON",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// La API rechaza campos que no conoce (aquí, \"admin\").",
+                  "pm.test('Responde 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Código INVALID_JSON', () => pm.expect(pm.response.json().error.code).to.eql('INVALID_JSON'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_id\": \"12345678-5\",\n  \"items\": [ { \"sku\": \"SKU-1\", \"quantity\": 1, \"unit_price\": 8990 } ],\n  \"admin\": true\n}"
+            },
+            "url": "{{baseUrl}}/orders"
+          }
+        },
+        {
+          "name": "Cuerpo demasiado grande → 413 PAYLOAD_TOO_LARGE",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Un customer_id de 70.000 caracteres supera el límite de 64 KB.",
+                  "pm.variables.set('bigText', 'x'.repeat(70000));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 413', () => pm.response.to.have.status(413));",
+                  "pm.test('Código PAYLOAD_TOO_LARGE', () => pm.expect(pm.response.json().error.code).to.eql('PAYLOAD_TOO_LARGE'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"customer_id\": \"{{bigText}}\", \"items\": [] }"
+            },
+            "url": "{{baseUrl}}/orders"
+          }
+        },
+        {
+          "name": "Idempotency-Key muy larga → 400 IDEMPOTENCY_KEY_INVALID",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// El máximo es 128 caracteres.",
+                  "pm.variables.set('longKey', 'k'.repeat(129));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Código IDEMPOTENCY_KEY_INVALID', () => pm.expect(pm.response.json().error.code).to.eql('IDEMPOTENCY_KEY_INVALID'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{longKey}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_id\": \"12345678-5\",\n  \"items\": [ { \"sku\": \"SKU-1\", \"quantity\": 1, \"unit_price\": 8990 } ]\n}"
+            },
+            "url": "{{baseUrl}}/orders"
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Estados del pedido",
+      "description": "Ejecutar en orden, después de «Crear pedido» de la carpeta 1 (y esperar un segundo a que el worker lo deje listo_para_despacho). Recorre: en_transito → no_entregado → en_transito → entregado → devuelto, y prueba un salto no permitido (409).",
+      "item": [
+        {
+          "name": "Esperar listo_para_despacho",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// El worker deja el pedido listo_para_despacho; si sigue en_preparacion, espere un segundo y repita.",
+                  "pm.test('El pedido está listo_para_despacho', () => pm.expect(pm.response.json().status).to.eql('listo_para_despacho'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/orders/{{orderId}}"
+          }
+        },
+        {
+          "name": "Salto no permitido (a entregado) → 409",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 409', () => pm.response.to.have.status(409));",
+                  "pm.test('Código ORDER_INVALID_TRANSITION', () => pm.expect(pm.response.json().error.code).to.eql('ORDER_INVALID_TRANSITION'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"status\": \"entregado\" }"
+            },
+            "url": "{{baseUrl}}/orders/{{orderId}}/status"
+          }
+        },
+        {
+          "name": "Despachar → en_transito",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Ahora está en_transito', () => pm.expect(pm.response.json().status).to.eql('en_transito'));",
+                  "pm.test('Siguientes estados: entregado, no_entregado', () => pm.expect(pm.response.json().next_statuses).to.eql(['entregado','no_entregado']));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"status\": \"en_transito\" }"
+            },
+            "url": "{{baseUrl}}/orders/{{orderId}}/status"
+          }
+        },
+        {
+          "name": "No se pudo entregar → no_entregado",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Ahora está no_entregado', () => pm.expect(pm.response.json().status).to.eql('no_entregado'));",
+                  "pm.test('Siguientes estados: en_transito, devuelto', () => pm.expect(pm.response.json().next_statuses).to.eql(['en_transito','devuelto']));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"status\": \"no_entregado\" }"
+            },
+            "url": "{{baseUrl}}/orders/{{orderId}}/status"
+          }
+        },
+        {
+          "name": "Reintentar entrega → en_transito",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Ahora está en_transito', () => pm.expect(pm.response.json().status).to.eql('en_transito'));",
+                  "pm.test('Siguientes estados: entregado, no_entregado', () => pm.expect(pm.response.json().next_statuses).to.eql(['entregado','no_entregado']));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"status\": \"en_transito\" }"
+            },
+            "url": "{{baseUrl}}/orders/{{orderId}}/status"
+          }
+        },
+        {
+          "name": "Entregar → entregado",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Ahora está entregado', () => pm.expect(pm.response.json().status).to.eql('entregado'));",
+                  "pm.test('Siguientes estados: devuelto', () => pm.expect(pm.response.json().next_statuses).to.eql(['devuelto']));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"status\": \"entregado\" }"
+            },
+            "url": "{{baseUrl}}/orders/{{orderId}}/status"
+          }
+        },
+        {
+          "name": "Devolver → devuelto",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('Ahora está devuelto', () => pm.expect(pm.response.json().status).to.eql('devuelto'));",
+                  "pm.test('Siguientes estados: ninguno', () => pm.expect(pm.response.json().next_statuses).to.eql([]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"status\": \"devuelto\" }"
+            },
+            "url": "{{baseUrl}}/orders/{{orderId}}/status"
+          }
+        },
+        {
+          "name": "Estado desconocido → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Código ORDER_INVALID_STATUS', () => pm.expect(pm.response.json().error.code).to.eql('ORDER_INVALID_STATUS'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"status\": \"perdido\" }"
+            },
+            "url": "{{baseUrl}}/orders/{{orderId}}/status"
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Consultas con error (400 / 404)",
+      "item": [
+        {
+          "name": "Pedido inexistente → 404 ORDER_NOT_FOUND",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 404', () => pm.response.to.have.status(404));",
+                  "pm.test('Código ORDER_NOT_FOUND', () => pm.expect(pm.response.json().error.code).to.eql('ORDER_NOT_FOUND'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/orders/6b2f7f53-6a8e-4e0f-9b43-6a1f1d1f6c11"
+          }
+        },
+        {
+          "name": "Id que no es UUID → 400 ORDER_INVALID_ID",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Código ORDER_INVALID_ID', () => pm.expect(pm.response.json().error.code).to.eql('ORDER_INVALID_ID'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/orders/abc"
+          }
+        },
+        {
+          "name": "Ruta inexistente → 404 ROUTE_NOT_FOUND",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 404', () => pm.response.to.have.status(404));",
+                  "pm.test('Código ROUTE_NOT_FOUND', () => pm.expect(pm.response.json().error.code).to.eql('ROUTE_NOT_FOUND'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/no-existe"
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Operación (health, ready, metrics)",
+      "item": [
+        {
+          "name": "API · health → 200",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('El proceso está vivo', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/health"
+          }
+        },
+        {
+          "name": "API · ready → 200",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// 503 si PostgreSQL no responde.",
+                  "pm.test('La base de datos responde', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/ready"
+          }
+        },
+        {
+          "name": "API · metrics",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 200', () => pm.response.to.have.status(200));",
+                  "console.log('Métricas de la API:', pm.response.text());"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/metrics"
+          }
+        },
+        {
+          "name": "Worker · health → 200",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('El worker está vivo', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{workerUrl}}/health"
+          }
+        },
+        {
+          "name": "Worker · ready → 200",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('La base de datos responde', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{workerUrl}}/ready"
+          }
+        },
+        {
+          "name": "Worker · metrics",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Responde 200', () => pm.response.to.have.status(200));",
+                  "console.log('Métricas del worker:', pm.response.text());"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{workerUrl}}/metrics"
+          }
+        }
+      ]
+    }
+  ]
+}
