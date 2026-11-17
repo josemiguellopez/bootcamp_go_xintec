@@ -115,13 +115,23 @@ export const sound = {
   },
 
   /** Aviso de reparto: un "ding-dong" corto y suave cuando cambia el estado del pedido. */
-  notify() {
+  notify(status) {
     if (!enabled || !audio()) return;
     const t = ctx.currentTime + 0.02;
-    [
-      [1318.5, 0],
-      [987.8, 0.16],
-    ].forEach(([freq, delay]) => {
+    // Entregado: una pequeña fanfarria (do-mi-sol-do). Los demás: "ding-dong".
+    const notes =
+      status === "entregado"
+        ? [
+            [523.3, 0],
+            [659.3, 0.11],
+            [784, 0.22],
+            [1046.5, 0.36],
+          ]
+        : [
+            [1318.5, 0],
+            [987.8, 0.16],
+          ];
+    notes.forEach(([freq, delay]) => {
       const osc = ctx.createOscillator();
       const g = ctx.createGain();
       osc.type = "sine";

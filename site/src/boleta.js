@@ -22,11 +22,13 @@ const ACTION = {
 };
 
 /** Qué agente deja el pedido en cada estado (para el timbre y el seguimiento). */
+// name: para el timbre · short: para el seguimiento (una línea de 80 mm no da para más).
 const SIGNED_BY = {
-  en_preparacion: { agent: "api", name: "Agente API" },
-  listo_para_despacho: { agent: "worker", name: "Agente Worker" },
+  en_preparacion: { agent: "api", name: "Agente API", short: "API" },
+  listo_para_despacho: { agent: "worker", name: "Agente Worker", short: "Worker" },
 };
-const signer = (status) => SIGNED_BY[status] ?? { agent: "api", name: "Agente API (a su pedido)" };
+// Los demás estados los pide la persona desde la página (botones de reparto), vía la API.
+const signer = (status) => SIGNED_BY[status] ?? { agent: "api", name: "Agente API · a su pedido", short: "Usted" };
 
 const AGENTS_ROW = [
   ["cliente", "Cliente"],
@@ -43,7 +45,7 @@ const history = new Map();
 function track(order) {
   const list = history.get(order.id) ?? [];
   if (list.at(-1)?.status !== order.status) {
-    list.push({ status: order.status, at: new Date(order.updated_at), by: signer(order.status).name });
+    list.push({ status: order.status, at: new Date(order.updated_at), by: signer(order.status).short });
   }
   history.set(order.id, list);
   return list;
@@ -158,7 +160,20 @@ function buildBoleta(order, { forPrint = false } = {}) {
   // Seguimiento
   const follow = el("div", "b-block");
   follow.append(el("p", "b-label", "SEGUIMIENTO"));
-  for (const s of steps) follow.append(row(`${time(s.at)} ${STATUS[s.status]?.text ?? s.status}`, s.by, "b-follow"));
+  // Una línea por cambio, como una boleta real: hora · estado ······ quién.
+  for (const s of steps) {
+    const line = el("div", "b-follow");
+    line.append(
+      el("span", "b-follow-time", time(s.at)),
+      el("span", "b-follow-state", STATUS[s.status]?.text ?? s.status),
+      el("span", "b-follow-dots"),
+      el("span", "b-follow-by", s.by),
+    );
+    follow.append(line);
+  }
+  if (steps.some((s) => s.by === "Usted")) {
+    follow.append(el("p", "b-follow-note", "Usted: cambio pedido desde esta página (vía Agente API)."));
+  }
 
   // Código de barras con el número de pedido
   const code = el("div", "b-code");
@@ -229,6 +244,7 @@ function tracker(status, from) {
   t.style.setProperty("--to", String(idx / 3));
   t.style.setProperty("--from", String((from ? TRACK_INDEX[from] ?? idx : idx) / 3));
   if (from) t.classList.add("moved");
+  if (from && status === "entregado") t.classList.add("arrived"); // el camión llega a la casa
   t.setAttribute("aria-label", `Seguimiento: ${STATUS[status]?.text ?? status}`);
 
   const rail = el("div", "tracker-rail");
@@ -255,11 +271,31 @@ function statusNotice(order, box) {
   const n = el("div", "status-notice");
   n.dataset.status = order.status;
   n.setAttribute("role", "status");
-  const icon = el("span", "status-notice-icon", STATUS_ICON[order.status] ?? "🔔");
+  const delivered = order.status === "entregado";
+  const icon = el("span", "status-notice-icon", delivered ? "🎉" : STATUS_ICON[order.status] ?? "🔔");
   icon.setAttribute("aria-hidden", "true");
+  if (delivered) {
+    // ¡Llegó! Confeti que sale desde el ícono.
+    n.classList.add("celebrate");
+    const confetti = el("span", "confetti");
+    confetti.setAttribute("aria-hidden", "true");
+    const colors = ["#f23d49", "#0f7a40", "#0170b9", "#e2a23b", "#7a5bd6", "#ffd60a"];
+    for (let i = 0; i < 28; i++) {
+      const bit = el("i");
+      const angle = (Math.PI * 2 * i) / 28 + Math.random() * 0.4;
+      const dist = 60 + Math.random() * 90;
+      bit.style.setProperty("--x", `${Math.cos(angle) * dist}px`);
+      bit.style.setProperty("--y", `${Math.sin(angle) * dist * 0.7 - 30}px`);
+      bit.style.setProperty("--r", `${Math.round(Math.random() * 720 - 360)}deg`);
+      bit.style.setProperty("--c", colors[i % colors.length]);
+      bit.style.setProperty("--d", `${Math.round(Math.random() * 120)}ms`);
+      confetti.append(bit);
+    }
+    icon.append(confetti);
+  }
   const body = el("div", "status-notice-body");
   body.append(
-    el("strong", "", `Estado actualizado: ${STATUS[order.status]?.text ?? order.status}`),
+    el("strong", "", delivered ? "¡Pedido entregado! El cliente ya lo tiene" : `Estado actualizado: ${STATUS[order.status]?.text ?? order.status}`),
     el("span", "", `${STATUS[order.status]?.help ?? ""} (${time(new Date(order.updated_at))})`),
   );
   const see = el("button", "link-btn", "Ver el timbre nuevo en la boleta ↑");
