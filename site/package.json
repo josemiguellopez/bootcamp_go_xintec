@@ -1,0 +1,15 @@
+{
+  "name": "eventflow-site",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Sitio interactivo del desafío EventFlow: agentes que arman un pedido en vivo contra la API en Go.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "vite": "5.4.11"
+  }
+}
