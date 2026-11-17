@@ -319,7 +319,7 @@ export function setupWorkshop({ swarm, conn, onSearch }) {
       if (res.ok) {
         renderReceipt(box, res.data, { ...opts, title: receiptTitle(res.data) });
         toast(`Estado cambiado a «${STATUS[res.data.status]?.text ?? res.data.status}»`);
-        sound.notify();
+        sound.notify(res.data.status);
         // El aviso y el seguimiento quedan a la vista, junto a los botones (sin tener que subir).
         box.querySelector(".status-notice")?.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "center" });
       } else {

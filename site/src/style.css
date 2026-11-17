@@ -1651,8 +1651,41 @@ html[data-view="como"] #como {
   letter-spacing: 0.08em;
 }
 
+/* Seguimiento: hora · estado ······ quién, siempre en una línea. */
 .b-follow {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
   font-size: 14.5px;
+  white-space: nowrap;
+}
+
+.b-follow-time {
+  flex: none;
+}
+
+.b-follow-state {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.b-follow-dots {
+  flex: 1;
+  min-width: 12px;
+  border-bottom: 2px dotted #8a8a90;
+  transform: translateY(-0.3em);
+}
+
+.b-follow-by {
+  flex: none;
+  font-weight: 700;
+}
+
+.b-follow-note {
+  margin-top: 4px !important;
+  font-size: 12.5px;
+  color: #4b4b50;
 }
 
 .b-agent {
@@ -1881,6 +1914,108 @@ html[data-view="como"] #como {
 
 .status-notice .link-btn {
   font-size: 15px;
+}
+
+/* ¡Entregado! El aviso se celebra: ícono que salta, confeti y un brillo verde. */
+.status-notice.celebrate {
+  position: relative;
+  background: linear-gradient(120deg, var(--ok-bg), #f3fff7 50%, var(--ok-bg));
+  background-size: 200% 100%;
+  animation:
+    notice-in 0.45s cubic-bezier(0.3, 1.4, 0.5, 1),
+    notice-glow 1.2s ease-out 0.4s 3,
+    shine 2.4s ease-in-out 0.3s;
+}
+
+.status-notice.celebrate .status-notice-icon {
+  position: relative;
+  font-size: 36px;
+  animation: celebrate-icon 0.9s cubic-bezier(0.3, 1.6, 0.5, 1) 0.15s both;
+}
+
+.status-notice.celebrate strong {
+  font-size: 19px;
+}
+
+.confetti {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  pointer-events: none;
+}
+
+.confetti i {
+  position: absolute;
+  width: 7px;
+  height: 11px;
+  border-radius: 2px;
+  background: var(--c);
+  opacity: 0;
+  animation: confetti 1.3s cubic-bezier(0.2, 0.8, 0.4, 1) var(--d) forwards;
+}
+
+.confetti i:nth-child(3n) {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+@keyframes confetti {
+  0% {
+    opacity: 1;
+    transform: translate(0, 0) rotate(0) scale(0.6);
+  }
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--x), calc(var(--y) + 40px)) rotate(var(--r)) scale(1);
+  }
+}
+
+@keyframes celebrate-icon {
+  0% {
+    transform: scale(0.3) rotate(-30deg);
+  }
+  45% {
+    transform: scale(1.5) rotate(12deg);
+  }
+  70% {
+    transform: scale(0.9) rotate(-6deg);
+  }
+}
+
+@keyframes shine {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+/* El camión llega a la casa: la casa salta y se ilumina en verde. */
+.tracker.moved.arrived .tracker-step:last-child .tracker-dot {
+  animation: house-arrive 0.7s cubic-bezier(0.3, 1.6, 0.5, 1) 1.2s both;
+}
+
+.tracker.arrived .tracker-step:last-child .tracker-label {
+  animation: pop 0.4s ease 1.4s;
+}
+
+@keyframes house-arrive {
+  0% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(15, 122, 64, 0.5);
+  }
+  40% {
+    transform: scale(1.35) translateY(-4px);
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 10px rgba(15, 122, 64, 0);
+  }
 }
 
 @keyframes notice-in {
