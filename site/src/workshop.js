@@ -11,6 +11,7 @@ import { formatRUT, renderReceipt } from "./boleta.js";
 import { PRODUCTS } from "./products.js";
 import { normalizeRUT } from "./api.js";
 import { thickCaret } from "./caret.js";
+import { sound } from "./sound.js";
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const delta = (before, after, name) => (after?.[name] ?? 0) - (before?.[name] ?? 0);
@@ -318,6 +319,9 @@ export function setupWorkshop({ swarm, conn, onSearch }) {
       if (res.ok) {
         renderReceipt(box, res.data, { ...opts, title: receiptTitle(res.data) });
         toast(`Estado cambiado a «${STATUS[res.data.status]?.text ?? res.data.status}»`);
+        sound.notify();
+        // El aviso y el seguimiento quedan a la vista, junto a los botones (sin tener que subir).
+        box.querySelector(".status-notice")?.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "center" });
       } else {
         const code = res.data?.error?.code ?? "ERROR";
         const current = await conn.api.getOrder(id);

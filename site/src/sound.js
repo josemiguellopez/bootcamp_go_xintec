@@ -114,6 +114,27 @@ export const sound = {
     playSlice(CUT_FROM, buffer.duration - CUT_FROM, { fadeIn: 0.005, fadeOut: 0.05 });
   },
 
+  /** Aviso de reparto: un "ding-dong" corto y suave cuando cambia el estado del pedido. */
+  notify() {
+    if (!enabled || !audio()) return;
+    const t = ctx.currentTime + 0.02;
+    [
+      [1318.5, 0],
+      [987.8, 0.16],
+    ].forEach(([freq, delay]) => {
+      const osc = ctx.createOscillator();
+      const g = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      g.gain.setValueAtTime(0.0001, t + delay);
+      g.gain.exponentialRampToValueAtTime(0.18, t + delay + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + delay + 0.5);
+      osc.connect(g).connect(master);
+      osc.start(t + delay);
+      osc.stop(t + delay + 0.55);
+    });
+  },
+
   /** Boleta lista: dos pitidos cortos y suaves, como una caja registradora. */
   beep() {
     if (!enabled || !audio()) return;

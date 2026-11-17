@@ -208,6 +208,68 @@ function buildBoleta(order, { forPrint = false } = {}) {
   return paper;
 }
 
+// ---------------------------------------------------------------------------
+// Seguimiento del reparto, junto a los botones: así quien cambia el estado ve el
+// cambio donde está mirando (la boleta y su timbre quedan más arriba).
+
+const TRACK = [
+  ["en_preparacion", "Preparación", "📋"],
+  ["listo_para_despacho", "Listo", "📦"],
+  ["en_transito", "En camino", "🚚"],
+  ["entregado", "Entregado", "🏠"],
+];
+const TRACK_INDEX = { en_preparacion: 0, listo_para_despacho: 1, en_transito: 2, no_entregado: 2, entregado: 3, devuelto: 3 };
+const STATUS_ICON = { en_preparacion: "📋", listo_para_despacho: "📦", en_transito: "🚚", entregado: "✅", no_entregado: "⚠️", devuelto: "↩️" };
+
+/** La barra con los 4 pasos del reparto; el camión avanza desde el estado anterior (from). */
+function tracker(status, from) {
+  const idx = TRACK_INDEX[status] ?? 0;
+  const t = el("div", "tracker");
+  t.dataset.status = status;
+  t.style.setProperty("--to", String(idx / 3));
+  t.style.setProperty("--from", String((from ? TRACK_INDEX[from] ?? idx : idx) / 3));
+  if (from) t.classList.add("moved");
+  t.setAttribute("aria-label", `Seguimiento: ${STATUS[status]?.text ?? status}`);
+
+  const rail = el("div", "tracker-rail");
+  rail.setAttribute("aria-hidden", "true");
+  rail.append(el("span", "tracker-fill"), el("span", "tracker-truck", status === "devuelto" ? "↩️" : "🚚"));
+
+  const steps = el("ol", "tracker-steps");
+  TRACK.forEach(([, label, icon], i) => {
+    let text = label;
+    let state = i < idx ? "done" : i === idx ? "current" : "todo";
+    if (i === 2 && status === "no_entregado") [text, state] = ["No entregado", "warn"];
+    if (i === 3 && status === "devuelto") [text, state] = ["Devuelto", "returned"];
+    const li = el("li", "tracker-step");
+    li.dataset.state = state;
+    li.append(el("span", "tracker-dot", state === "done" ? "✓" : icon), el("span", "tracker-label", text));
+    steps.append(li);
+  });
+  t.append(rail, steps);
+  return t;
+}
+
+/** El aviso de que el estado cambió, con un atajo para ver el timbre nuevo en la boleta. */
+function statusNotice(order, box) {
+  const n = el("div", "status-notice");
+  n.dataset.status = order.status;
+  n.setAttribute("role", "status");
+  const icon = el("span", "status-notice-icon", STATUS_ICON[order.status] ?? "🔔");
+  icon.setAttribute("aria-hidden", "true");
+  const body = el("div", "status-notice-body");
+  body.append(
+    el("strong", "", `Estado actualizado: ${STATUS[order.status]?.text ?? order.status}`),
+    el("span", "", `${STATUS[order.status]?.help ?? ""} (${time(new Date(order.updated_at))})`),
+  );
+  const see = el("button", "link-btn", "Ver el timbre nuevo en la boleta ↑");
+  see.type = "button";
+  see.addEventListener("click", () => box.querySelector(".b-stamp")?.scrollIntoView({ behavior: "smooth", block: "center" }));
+  body.append(see);
+  n.append(icon, body);
+  return n;
+}
+
 /**
  * Dibuja la boleta de un pedido en box y, debajo, los controles (cambiar estado,
  * copiar, imprimir, buscar).
@@ -217,16 +279,22 @@ function buildBoleta(order, { forPrint = false } = {}) {
  * opts.onChangeStatus(id, status, box): agrega los botones de estado permitidos
  */
 export function renderReceipt(box, order, { title, note, onSearch, onChangeStatus } = {}) {
+  // ¿Es el mismo pedido con otro estado? (un botón de reparto, o el worker que lo dejó listo)
+  const changedFrom = box.dataset.orderId === order.id && box.dataset.status !== order.status ? box.dataset.status : null;
   box.dataset.state = "order";
 
   const banner = el("p", "receipt-banner");
-  banner.append(el("span", "receipt-banner-check", "✓"), el("span", "", title ?? "Pedido"));
+  const mark = el("span", "receipt-banner-check", { no_entregado: "!", devuelto: "↩" }[order.status] ?? "✓");
+  mark.dataset.status = order.status; // el color acompaña al estado (naranja si no se entregó)
+  banner.append(mark, el("span", "", title ?? "Pedido"));
 
   const wrap = el("div", "boleta-wrap");
   wrap.append(buildBoleta(order));
 
   const controls = el("div", "receipt-controls");
   controls.append(banner);
+  if (changedFrom) controls.append(statusNotice(order, box));
+  controls.append(tracker(order.status, changedFrom));
   if (note) controls.append(el("p", "receipt-note", note));
 
   // Botones de estado: solo los que la API permite (next_statuses). El primero es

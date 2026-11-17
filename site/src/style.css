@@ -1822,6 +1822,242 @@ html[data-view="como"] #como {
   color: var(--muted);
 }
 
+/* --------------------------------- aviso de cambio de estado (src/boleta.js) */
+/* Aparece junto a los botones al cambiar el estado: quien pulsó ve el cambio
+   sin tener que subir hasta el timbre de la boleta. */
+.status-notice {
+  --tone: var(--info);
+  --tone-bg: var(--info-bg);
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 2px solid var(--tone);
+  border-radius: 14px;
+  background: var(--tone-bg);
+  color: var(--ink);
+  animation:
+    notice-in 0.45s cubic-bezier(0.3, 1.4, 0.5, 1),
+    notice-glow 1.2s ease-out 0.4s 2;
+}
+
+.status-notice[data-status="listo_para_despacho"],
+.status-notice[data-status="entregado"] {
+  --tone: var(--ok);
+  --tone-bg: var(--ok-bg);
+}
+
+.status-notice[data-status="no_entregado"] {
+  --tone: var(--warn);
+  --tone-bg: var(--warn-bg);
+}
+
+.status-notice[data-status="devuelto"] {
+  --tone: var(--muted);
+  --tone-bg: #eef1f4;
+}
+
+.status-notice-icon {
+  font-size: 30px;
+  line-height: 1;
+  animation: notice-icon 0.6s ease-out 0.2s both;
+}
+
+.status-notice-body {
+  display: grid;
+  gap: 3px;
+  justify-items: start;
+}
+
+.status-notice-body strong {
+  color: var(--tone);
+  font: 700 18px/1.3 var(--display);
+}
+
+.status-notice-body span {
+  font-size: 15px;
+  color: var(--muted);
+}
+
+.status-notice .link-btn {
+  font-size: 15px;
+}
+
+@keyframes notice-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.97);
+  }
+}
+
+@keyframes notice-glow {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--tone) 45%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 14px transparent;
+  }
+}
+
+@keyframes notice-icon {
+  0% {
+    transform: scale(0.4) rotate(-20deg);
+  }
+  60% {
+    transform: scale(1.25) rotate(8deg);
+  }
+}
+
+/* -------------------------------------------- seguimiento del reparto */
+/* Cuatro pasos y un camión que avanza desde el estado anterior (--from) al
+   nuevo (--to); ambos van de 0 a 1. */
+.receipt-banner-check[data-status="no_entregado"] {
+  background: var(--warn);
+}
+
+.receipt-banner-check[data-status="devuelto"] {
+  background: var(--muted);
+}
+
+.receipt-banner-check[data-status="en_transito"] {
+  background: var(--info);
+}
+
+.tracker {
+  position: relative;
+  padding: 34px 0 2px;
+}
+
+.tracker-rail {
+  position: absolute;
+  top: 50px;
+  left: 12.5%;
+  right: 12.5%;
+  height: 4px;
+  border-radius: 4px;
+  background: var(--line);
+}
+
+.tracker-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: calc(var(--to) * 100%);
+  border-radius: 4px;
+  background: var(--ok);
+}
+
+.tracker-truck {
+  position: absolute;
+  top: -34px;
+  left: calc(var(--to) * 100%);
+  font-size: 22px;
+  line-height: 1;
+  transform: translateX(-50%) scaleX(-1); /* el emoji mira a la izquierda: lo damos vuelta */
+}
+
+.tracker.moved .tracker-fill {
+  animation: track-fill 1.1s ease-in-out 0.15s both;
+}
+
+.tracker.moved .tracker-truck {
+  animation:
+    track-truck 1.1s ease-in-out 0.15s both,
+    truck-bump 0.18s ease-in-out 0.15s 6;
+}
+
+.tracker-steps {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tracker-step {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  text-align: center;
+}
+
+.tracker-dot {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 2px solid var(--line-strong);
+  border-radius: 50%;
+  background: #fff;
+  font-size: 15px;
+}
+
+.tracker-label {
+  font: 600 13px/1.2 var(--sans);
+  color: var(--muted);
+}
+
+.tracker-step[data-state="done"] .tracker-dot {
+  border-color: var(--ok);
+  background: var(--ok);
+  color: #fff;
+  font-weight: 700;
+}
+
+.tracker-step[data-state="current"] .tracker-dot {
+  border-color: var(--ok);
+  box-shadow: 0 0 0 4px var(--ok-bg);
+}
+
+.tracker-step[data-state="current"] .tracker-label {
+  color: var(--ok);
+  font-weight: 700;
+}
+
+.tracker-step[data-state="warn"] .tracker-dot {
+  border-color: var(--warn);
+  box-shadow: 0 0 0 4px var(--warn-bg);
+}
+
+.tracker-step[data-state="warn"] .tracker-label {
+  color: var(--warn);
+  font-weight: 700;
+}
+
+.tracker-step[data-state="returned"] .tracker-dot {
+  border-color: var(--muted);
+  box-shadow: 0 0 0 4px #eef1f4;
+}
+
+.tracker-step[data-state="returned"] .tracker-label {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.tracker.moved .tracker-step[data-state="current"] .tracker-dot,
+.tracker.moved .tracker-step[data-state="warn"] .tracker-dot,
+.tracker.moved .tracker-step[data-state="returned"] .tracker-dot {
+  animation: pop 0.4s ease 1.2s;
+}
+
+@keyframes track-fill {
+  from {
+    width: calc(var(--from) * 100%);
+  }
+}
+
+@keyframes track-truck {
+  from {
+    left: calc(var(--from) * 100%);
+  }
+}
+
+@keyframes truck-bump {
+  50% {
+    margin-top: -3px;
+  }
+}
+
 .receipt-note {
   padding: 12px 14px;
   border-radius: 10px;
